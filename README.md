@@ -1,6 +1,5 @@
-Yes. For an open-source contributor, the README should be more than a project description. It should function as a **technical handoff document**: what ArchMorph is, why it exists, how it works internally, what has already been solved, what the current output proves, what is still wrong, and exactly where a contributor can work.
 
-Below is the version I recommend using as the **main `README.md`**.
+
 
 ````markdown
 # ArchMorph
