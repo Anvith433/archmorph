@@ -404,7 +404,12 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
         for (ModuleInfo module : report.getBusinessModules()) {
             module.getWarnings().removeIf(w -> w.startsWith("[opt]"));
             if (module.getClassCount() == 1) {
-                module.getWarnings().add("[opt] suspicious singleton module: only one class (" + only(module) + ")");
+                String hint = module.getDependenciesOnModules().entrySet().stream()
+                        .filter(e -> report.getModule(e.getKey()) != null && report.getModule(e.getKey()).isBusinessModule())
+                        .max(Map.Entry.<String, Integer>comparingByValue().thenComparing(Map.Entry.comparingByKey(Comparator.reverseOrder())))
+                        .map(e -> "; it mostly uses '" + e.getKey() + "' — merge it there unless it is a domain of its own")
+                        .orElse("");
+                module.getWarnings().add("[opt] suspicious singleton module: only one class (" + only(module) + ")" + hint);
             }
             if (module.getClassCount() >= config.getOversizedModuleMinClasses()
                     && businessClasses > 0

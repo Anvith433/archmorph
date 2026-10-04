@@ -64,7 +64,7 @@ Also run on [spring-boot-realworld-example-app](https://github.com/gothinkster/s
 [jhipster-sample-app](https://github.com/jhipster/jhipster-sample-app) (Maven, JHipster layout; 136 files).
 Both transform with levels 1–6 passing and every original dependency preserved. On realworld the modules are
 article, comment, profile, tag and user, plus a low-confidence one-class `relation` module (the follow/unfollow
-mutation) that a reviewer would merge into profile; entities and mappers named in MyBatis XML stay in place for manual
+mutation), flagged for review with the suggestion to merge it into user, the module it mostly uses; entities and mappers named in MyBatis XML stay in place for manual
 review, because moving them would break the mappers. On JHipster the modules are account, authority,
 bankaccount, label, operation and user; two different `EmailAlreadyUsedException` classes would collide in
 `shared`, so both are kept in place and reported as a conflict. Neither build was run here: realworld pins
