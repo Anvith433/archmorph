@@ -137,6 +137,15 @@ public class ArchMorphProperties {
         private boolean enabled = true;
         /** COMPILE runs {@code mvn -DskipTests compile}; TEST runs {@code mvn test}. */
         private BuildMode mode = BuildMode.COMPILE;
+        /**
+         * Gradle projects: run the host's Gradle (never the uploaded gradlew). Off by default because Gradle build
+         * scripts are code that runs with ArchMorph's privileges.
+         */
+        private boolean gradleEnabled = false;
+        private String gradleExecutable = "gradle";
+        /** Shared Gradle dependency cache; blank uses &lt;workspace&gt;/gradle-home. */
+        private String gradleUserHome = "";
+        private String gradleOpts = "-Xmx1g";
         /** Maven executable from the host. The uploaded mvnw is never executed. */
         private String mavenExecutable = "mvn";
         private Duration timeout = Duration.ofSeconds(240);

@@ -86,10 +86,29 @@ public class ModulithSetup {
      * @param configuredVersion Spring Modulith version to use; blank to derive it from the Spring Boot version
      */
     public Result apply(Path projectRoot, String applicationClass, String configuredVersion) throws IOException {
+        return apply(projectRoot, "", applicationClass, configuredVersion);
+    }
+
+    /**
+     * @param moduleDirectory project-relative directory of the Maven module holding the application class ("" for
+     *                        a single-module project); its pom receives the dependencies and its tests the new test
+     */
+    public Result apply(Path projectRoot, String moduleDirectory, String applicationClass, String configuredVersion) throws IOException {
         List<String> warnings = new ArrayList<>();
-        Path pomFile = projectRoot.resolve("pom.xml");
+        Path moduleRoot = moduleDirectory == null || moduleDirectory.isEmpty() ? projectRoot : projectRoot.resolve(moduleDirectory).normalize();
+        if (!moduleRoot.startsWith(projectRoot)) {
+            return new Result(false, null, null, List.of("The application module lies outside the project; Spring Modulith was not added."));
+        }
+        if (!Files.isRegularFile(moduleRoot.resolve("pom.xml"))
+                && (Files.isRegularFile(projectRoot.resolve("build.gradle")) || Files.isRegularFile(projectRoot.resolve("build.gradle.kts")))) {
+            return new Result(false, null, null, List.of("Gradle build: build scripts are not edited. Add "
+                    + "testImplementation(platform(\"org.springframework.modulith:spring-modulith-bom:<version>\")) and "
+                    + "testImplementation(\"org.springframework.modulith:spring-modulith-starter-test\") to enable the "
+                    + "ModularityTests shown in MODULES.md."));
+        }
+        Path pomFile = moduleRoot.resolve("pom.xml");
         if (!Files.isRegularFile(pomFile)) {
-            return new Result(false, null, null, List.of("No pom.xml at the project root; Spring Modulith was not added."));
+            return new Result(false, null, null, List.of("No pom.xml for the application module; Spring Modulith was not added."));
         }
         if (applicationClass == null) {
             return new Result(false, null, null, List.of("No @SpringBootApplication class found; Spring Modulith was not added."));
@@ -97,11 +116,15 @@ public class ModulithSetup {
         String original = Files.readString(pomFile, StandardCharsets.UTF_8);
         PomDocument pom = PomDocument.parse(original);
 
+        Optional<String> bootVersion = springBootVersion(pom);
+        if (bootVersion.isEmpty() && !moduleRoot.equals(projectRoot) && Files.isRegularFile(projectRoot.resolve("pom.xml"))) {
+            bootVersion = springBootVersion(PomDocument.parse(Files.readString(projectRoot.resolve("pom.xml"), StandardCharsets.UTF_8)));
+        }
         String version = configuredVersion != null && !configuredVersion.isBlank() ? configuredVersion.trim()
-                : springBootVersion(pom).flatMap(ModulithSetup::modulithVersionFor).orElse(null);
+                : bootVersion.flatMap(ModulithSetup::modulithVersionFor).orElse(null);
         boolean alreadyDeclared = original.contains("spring-modulith");
         if (version == null && !alreadyDeclared) {
-            return new Result(false, null, null, List.of("The Spring Boot version (" + springBootVersion(pom).orElse("unknown")
+            return new Result(false, null, null, List.of("The Spring Boot version (" + bootVersion.orElse("unknown")
                     + ") has no known Spring Modulith release; set archmorph.transformation.modulith-version to add it."));
         }
 
@@ -116,7 +139,7 @@ public class ModulithSetup {
             warnings.add("The project declares no JUnit 5 test dependency; add spring-boot-starter-test to run ModularityTests.");
         }
 
-        String testFile = writeTest(projectRoot, applicationClass, warnings);
+        String testFile = writeTest(projectRoot, moduleRoot, applicationClass, warnings);
         return new Result(pomUpdated || alreadyDeclared, testFile, version, warnings);
     }
 
@@ -188,11 +211,11 @@ public class ModulithSetup {
 
     // ================================================================== test
 
-    private static String writeTest(Path projectRoot, String applicationClass, List<String> warnings) throws IOException {
+    private static String writeTest(Path projectRoot, Path moduleRoot, String applicationClass, List<String> warnings) throws IOException {
         int dot = applicationClass.lastIndexOf('.');
         String pkg = dot < 0 ? "" : applicationClass.substring(0, dot);
         String simpleName = applicationClass.substring(dot + 1);
-        Path directory = projectRoot.resolve("src/test/java");
+        Path directory = moduleRoot.resolve("src/test/java");
         if (!pkg.isEmpty()) {
             directory = directory.resolve(pkg.replace('.', '/'));
         }

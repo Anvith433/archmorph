@@ -35,6 +35,18 @@ public final class Projects {
     public static ProjectModel model(Path dir, Map<String, String> files) throws IOException {
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("pom.xml"), "<project><groupId>t</groupId><artifactId>t</artifactId></project>");
+        return sources(dir, files);
+    }
+
+    /** A single-project Gradle build with the given main sources. */
+    public static ProjectModel gradleModel(Path dir, Map<String, String> files) throws IOException {
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("settings.gradle"), "rootProject.name = 't'\n");
+        Files.writeString(dir.resolve("build.gradle"), "plugins { id 'java' }\n");
+        return sources(dir, files);
+    }
+
+    private static ProjectModel sources(Path dir, Map<String, String> files) throws IOException {
         for (Map.Entry<String, String> file : files.entrySet()) {
             Path path = dir.resolve("src/main/java").resolve(file.getKey());
             Files.createDirectories(path.getParent());

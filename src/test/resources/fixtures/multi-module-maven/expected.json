@@ -1,0 +1,24 @@
+{
+  "description": "Multi-module Maven build with a nested aggregator (libs/shop-core) and an application module (shop-app) that uses the core classes. Classes move within their own Maven module; references from other modules are rewritten.",
+  "modules": [
+    "customer",
+    "order"
+  ],
+  "moved": {
+    "com.shop.service.OrderService": "com.shop.modules.order.service.OrderService",
+    "com.shop.controller.CustomerController": "com.shop.modules.customer.controller.CustomerController"
+  },
+  "targetFiles": {
+    "libs/shop-core/src/main/java/com/shop/service/OrderService.java": "libs/shop-core/src/main/java/com/shop/modules/order/service/OrderService.java",
+    "shop-app/src/main/java/com/shop/ShopApplication.java": "shop-app/src/main/java/com/shop/ShopApplication.java"
+  },
+  "kept": [
+    "com.shop.ShopApplication"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

@@ -236,12 +236,19 @@ public class ProjectWorkflow {
         if (!plan.isModulithVerification()) {
             return;
         }
-        String application = session.analysis().model().mainTopLevelTypes().stream()
-                .filter(t -> t.getComponentType() == com.anvith.archmorph.parser.ComponentType.APPLICATION)
-                .map(t -> plan.getClassMap().getOrDefault(t.getQualifiedName(), t.getQualifiedName()))
-                .sorted().findFirst().orElse(null);
+        var applicationEntry = plan.getEntries().stream()
+                .filter(e -> e.getScope() == com.anvith.archmorph.parser.SourceScope.MAIN && e.getNode() != null
+                        && e.getNode().getComponentType() == com.anvith.archmorph.parser.ComponentType.APPLICATION)
+                .min(java.util.Comparator.comparing(e -> e.getNode().getId()));
+        String application = applicationEntry.map(e -> plan.getClassMap().getOrDefault(e.getNode().getId(), e.getNode().getId())).orElse(null);
+        // the Maven module of the application class: the part of its path before src/main/java
+        String moduleDirectory = applicationEntry.map(e -> {
+            String path = e.getTargetFile().toString().replace('\\', '/');
+            int index = path.indexOf("src/main/java/");
+            return index > 0 ? path.substring(0, index - 1) : "";
+        }).orElse("");
         try {
-            var result = modulithSetup.apply(session.workspace().transformed(), application,
+            var result = modulithSetup.apply(session.workspace().transformed(), moduleDirectory, application,
                     properties.getTransformation().getModulithVersion());
             if (result.testFile() != null && !plan.getGeneratedFiles().contains(result.testFile())) {
                 plan.getGeneratedFiles().add(result.testFile());

@@ -195,7 +195,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         entry.setFolder(m.getFolderType());
         entry.setConfidence(assignment.confidence());
         entry.setTargetPackage(m.getTargetPackage());
-        entry.setTargetFile(targetPath(SourceScope.MAIN, m.getTargetPackage(), file.getFileName()));
+        entry.setTargetFile(targetPath(file, m.getTargetPackage()));
 
         if (assignment.excluded()) {
             keep(entry, SafetyLevel.SAFE, "excluded from the transformation by the user");
@@ -289,7 +289,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
             entry.setModule(tested.get().getModule());
             entry.setFolder(tested.get().getFolder());
             entry.setTargetPackage(tested.get().getTargetPackage());
-            entry.setTargetFile(targetPath(SourceScope.TEST, tested.get().getTargetPackage(), file.getFileName()));
+            entry.setTargetFile(targetPath(file, tested.get().getTargetPackage()));
             entry.getActions().add(TransformationAction.MOVE);
             entry.getActions().add(TransformationAction.REWRITE_PACKAGE);
             retargetClasses(entry);
@@ -328,12 +328,25 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         return entry;
     }
 
-    private Path targetPath(SourceScope scope, String targetPackage, String fileName) {
-        Path path = Path.of("src", scope == SourceScope.MAIN ? "main" : "test", "java");
+    /**
+     * New location of a file: same source root (so a class never leaves its Maven module or Gradle subproject),
+     * package directory of the target package.
+     */
+    static Path targetPath(SourceFile file, String targetPackage) {
+        Path path = sourceRootPrefix(file);
         if (targetPackage != null && !targetPackage.isEmpty()) {
             path = path.resolve(targetPackage.replace('.', '/'));
         }
-        return path.resolve(fileName);
+        return path.resolve(file.getFileName());
+    }
+
+    /** Project-relative source root of a file, e.g. {@code domain/src/main/java}. */
+    static Path sourceRootPrefix(SourceFile file) {
+        String relative = file.getRelativePath().replace('\\', '/');
+        String withinRoot = file.getSourceRoot().relativize(file.getAbsolutePath()).toString().replace('\\', '/');
+        String prefix = relative.endsWith(withinRoot) ? relative.substring(0, relative.length() - withinRoot.length()) : "";
+        prefix = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+        return prefix.isEmpty() ? Path.of("") : Path.of(prefix);
     }
 
     // ================================================================== rules

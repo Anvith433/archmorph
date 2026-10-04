@@ -1,0 +1,28 @@
+{
+  "description": "Multi-project Gradle build (Kotlin DSL, multi-line include). Classes move within their own subproject; the module API (types used by other modules or by the application) sits in the module root package.",
+  "strategy": "MODULAR_MONOLITH",
+  "modules": [
+    "appointment",
+    "patient"
+  ],
+  "moved": {
+    "com.clinic.controller.PatientController": "com.clinic.patient.PatientController",
+    "com.clinic.entity.Appointment": "com.clinic.appointment.entity.Appointment"
+  },
+  "movedTests": {
+    "com.clinic.service.PatientServiceTest": "com.clinic.patient.PatientServiceTest"
+  },
+  "targetFiles": {
+    "clinic-core/src/main/java/com/clinic/entity/Patient.java": "clinic-core/src/main/java/com/clinic/patient/entity/Patient.java",
+    "clinic-core/src/test/java/com/clinic/service/PatientServiceTest.java": "clinic-core/src/test/java/com/clinic/patient/PatientServiceTest.java"
+  },
+  "kept": [
+    "com.clinic.ClinicApplication"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

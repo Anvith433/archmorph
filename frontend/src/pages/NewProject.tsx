@@ -67,7 +67,7 @@ export function NewProject() {
       <Topbar />
       <main id="main" className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="text-2xl font-semibold text-fg">Analyze a project</h1>
-        <p className="mt-1 text-sm text-muted">Upload a ZIP of a Maven-based Java or Spring Boot project. Nothing is changed until you approve a transformation.</p>
+        <p className="mt-1 text-sm text-muted">Upload a ZIP of a Maven or Gradle Java or Spring Boot project (single or multi-module). Nothing is changed until you approve a transformation.</p>
 
         <div
           onDragOver={(e) => {
@@ -132,7 +132,7 @@ export function NewProject() {
 
         <ul className="mt-10 grid gap-3 text-sm sm:grid-cols-3">
           <li className="flex gap-2 rounded-lg border border-line bg-panel p-3 text-muted"><Info className="h-4 w-4 shrink-0 text-info" aria-hidden />Maximum archive size: 100 MB</li>
-          <li className="flex gap-2 rounded-lg border border-line bg-panel p-3 text-muted"><Info className="h-4 w-4 shrink-0 text-info" aria-hidden />Java/Maven projects supported (Gradle not yet)</li>
+          <li className="flex gap-2 rounded-lg border border-line bg-panel p-3 text-muted"><Info className="h-4 w-4 shrink-0 text-info" aria-hidden />Maven and Gradle projects, including multi-module builds</li>
           <li className="flex gap-2 rounded-lg border border-line bg-panel p-3 text-muted"><ShieldCheck className="h-4 w-4 shrink-0 text-ok" aria-hidden />Every project gets an isolated workspace; generated files never touch your original</li>
         </ul>
       </main>

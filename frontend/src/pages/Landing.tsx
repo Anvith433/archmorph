@@ -7,7 +7,7 @@ const FEATURES = [
   { icon: Boxes, title: 'Business module discovery', body: 'A documented affinity model combines dependencies, naming, packages, entities, endpoints and type usage. Shared code stays shared.' },
   { icon: GitBranch, title: 'You stay in control', body: 'Rename, merge, split, move, lock or exclude. ArchMorph shows its suggestion, your decisions and the final plan side by side.' },
   { icon: FileDiff, title: 'Reviewable rewrites', body: 'Packages, imports and qualified names are rewritten from AST positions. Inspect every diff before you download anything.' },
-  { icon: ShieldCheck, title: 'Validated output', body: 'Seven validation levels — from file system and parsing to a sandboxed, allowlisted Maven build.' },
+  { icon: ShieldCheck, title: 'Validated output', body: 'Seven validation levels — from file system and parsing to a sandboxed, allowlisted Maven (or opt-in Gradle) build.' },
 ];
 
 function Stack({ title, rows, tone }: { title: string; rows: string[]; tone: 'muted' | 'accent' }) {

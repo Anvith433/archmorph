@@ -68,12 +68,14 @@ fixture, the transformed project passes `ApplicationModules.verify()` as well as
 | Module discovery, optimizer, user edits | implemented; heuristic by nature |
 | Deterministic planner (collisions, safety levels, demotion) | implemented |
 | AST-located source rewriter | implemented, golden-tested |
-| 7-level validation incl. sandboxed Maven | implemented |
+| 7-level validation incl. sandboxed Maven (and opt-in Gradle) build | implemented |
 | Async jobs, REST API, rate limiting, security headers | implemented, single instance, in memory |
 | React review UI | implemented |
 | Modular monolith target (module API vs internals, Spring Modulith conventions) | implemented, default |
 | Package-by-module target (`modules.<module>.<layer>`) | implemented, selectable |
-| Gradle, Kotlin, multi-module Maven builds | **not supported** (detected and reported) |
+| Multi-module Maven builds (nested aggregators) | implemented; classes move within their own Maven module |
+| Gradle builds (single and multi-project, Groovy or Kotlin DSL) | implemented; scripts are read, never evaluated; the Gradle build level is opt-in |
+| Kotlin, Groovy, Scala sources | **not rewritten** (preserved and reported) |
 | Authentication / multi-user | structure prepared, **not implemented** (local mode) |
 
 ## How it works
@@ -246,7 +248,8 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.transformation.strategy` | `MODULAR_MONOLITH` | default target layout (`MODULAR_BY_DOMAIN` for package-by-module) |
 | `archmorph.transformation.add-modulith-verification` / `modulith-version` | `false` / derived | add Spring Modulith's test dependency and `ModularityTests` to the output; the version is derived from Spring Boot (4.1 → 2.1.1, 4.0 → 2.0.8, 3.5 → 1.4.13, …) unless set |
 | `archmorph.transformation.modules-package` / `shared-package` | `modules` / `shared` | package names (`modules` is used by `MODULAR_BY_DOMAIN` only) |
-| `archmorph.validation.build.enabled` | `true` | run the sandboxed Maven build level |
+| `archmorph.validation.build.enabled` | `true` | run the sandboxed build level |
+| `archmorph.validation.build.gradle-enabled` / `gradle-executable` / `gradle-user-home` / `gradle-opts` | `false` / `gradle` / next to the Maven repository / `-Xmx1g` | run Gradle builds (off by default: build scripts are code); the server's own Gradle, never the uploaded `gradlew` |
 | `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`, tests skipped) or `TEST` |
 | `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and isolated repository |
 | `archmorph.validation.build.timeout` | `PT4M` | hard wall-clock limit, process tree killed |
@@ -255,7 +258,7 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.jobs.worker-threads` / `max-queued-jobs` / `max-active-jobs-per-client` | `2` / `20` / `3` | job capacity |
 
 **Build validation runs the project's Maven build**, which executes the plugins and annotation processors the
-uploaded `pom.xml` declares. ArchMorph never runs `mvnw` or scripts from the upload, blocks command-runner
+uploaded `pom.xml` declares (Gradle, when enabled, evaluates the uploaded build scripts). ArchMorph never runs `mvnw` or scripts from the upload, blocks command-runner
 plugins, clears the environment and enforces a timeout — but this is not a security boundary. For untrusted
 projects run ArchMorph in a disposable container or set `archmorph.validation.build.enabled=false`.
 See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
@@ -267,7 +270,7 @@ Local, single-user mode by default (no login; designed so authentication can be 
 
 * hardened extraction: Zip Slip, absolute paths, symlinks, NUL bytes, bombs, entry and size limits, `CREATE_NEW`
 * server-generated UUIDs; every path resolved and verified inside its own workspace; workspaces expire
-* uploaded code is never executed except through the allowlisted, sandboxed Maven build
+* uploaded code is never executed except through the allowlisted, sandboxed Maven build (or the opt-in Gradle build)
 * no file-system paths, stack traces or internal class names in responses; generic 500s with a request ID
 * strict CSP, `X-Frame-Options: DENY`, `nosniff`, no-referrer, permissions policy; configured CORS allowlist
 * per-client rate limits and job quotas; uploaded source and secrets are never logged
@@ -281,9 +284,10 @@ cd frontend && npm run typecheck && npm run build
 ./mvnw test -Dtest=SourceRewriterGoldenTest -Dgolden.update=true   # regenerate golden files (review the diff!)
 ```
 
-* **13 fixture projects** (`src/test/resources/fixtures`) with `expected.json` expectations: layered,
+* **18 fixture projects** (`src/test/resources/fixtures`) with `expected.json` expectations: layered,
   shared components, cycles, ambiguous modules, duplicate class names, nested classes, generics,
-  multi-package, default package, malformed Java, security configuration, reflection.
+  multi-package, default package, malformed Java, security configuration, reflection, Lombok/MapStruct,
+  a real-world style project, multi-module Maven (nested aggregator), Gradle single and multi-project builds.
 * **Golden rewriter tests** (`src/test/resources/golden/rewriter`): wildcard and static imports, qualified
   references, nested classes, import ordering, CRLF, comments inside the import block, untouched files.
 * **Invariant tests** on every fixture: no lost files, unique destinations, package = directory, no stale
@@ -294,8 +298,11 @@ cd frontend && npm run typecheck && npm run build
 
 ## Known limitations
 
-* Maven only; Gradle, Kotlin and Groovy sources are detected and reported, not transformed. Multi-module
-  Maven builds are analysed from the shallowest `pom.xml` and not restructured.
+* Classes move only within their own Maven module or Gradle subproject; the build structure itself is not
+  restructured (no new Maven modules). Gradle subprojects come from `include(...)` string literals in the
+  settings file; relocated `projectDir`s and composite builds (`includeBuild`) are not analysed.
+* Kotlin, Groovy and Scala sources are preserved but not rewritten; references from them to moved Java classes
+  need manual review.
 * Module discovery is heuristic. Naming conventions matter; projects without domain-named classes produce
   low-confidence suggestions that need editing.
 * Strings are not code: reflection (`Class.forName("…")`), SpEL, `@ComponentScan` string packages,

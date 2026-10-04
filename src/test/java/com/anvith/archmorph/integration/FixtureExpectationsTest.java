@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -78,6 +79,13 @@ class FixtureExpectationsTest {
         }
         for (var move : expected.path("movedTests").properties()) {
             assertThat(run.plan().getClassMap()).as("test move of " + move.getKey()).containsEntry(move.getKey(), move.getValue().asString());
+        }
+        for (var file : expected.path("targetFiles").properties()) {
+            TransformationPlanEntry entry = run.plan().getEntries().stream()
+                    .filter(e -> e.getSourceFile().toString().replace('\\', '/').equals(file.getKey())).findFirst().orElseThrow();
+            assertThat(entry.getTargetFile().toString().replace('\\', '/')).as("target file of " + file.getKey())
+                    .isEqualTo(file.getValue().asString());
+            assertThat(run.transformed().resolve(file.getValue().asString())).exists();
         }
         for (String kept : strings(expected.path("kept"))) {
             assertThat(run.plan().getClassMap()).as(kept + " stays in place").doesNotContainKey(kept);
@@ -139,7 +147,8 @@ class FixtureExpectationsTest {
             List<String> errors = InMemoryCompiler.compile(run.transformed(), temp.resolve("classes"));
             assertThat(errors).as("compile errors of transformed " + fixture).isEmpty();
         }
-        assertThat(Files.exists(run.transformed().resolve("pom.xml"))).isTrue();
+        assertThat(Stream.of("pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+                .anyMatch(build -> Files.exists(run.transformed().resolve(build)))).as("build file preserved").isTrue();
     }
 
     private static Optional<TransformationPlanEntry> entryOf(PipelineRunner.Run run, String qualifiedName) {

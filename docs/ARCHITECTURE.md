@@ -197,7 +197,7 @@ See [TRANSFORMATION_ENGINE.md](TRANSFORMATION_ENGINE.md). Validation levels, in 
 | 4 | Import resolution | project imports resolve to existing classes; no import refers to a moved class's old location |
 | 5 | Dependency graph | graph rebuilt from the output preserves every original dependency (through the class map) and declares the same classes |
 | 6 | Architecture rules | moved classes under their module package, shared under `shared`; for `MODULAR_MONOLITH` every cross-module dependency must target the other module's API package (error otherwise); module-level cycles and shared → module dependencies as warnings |
-| 7 | Build | allowlisted `mvn -B -q -DskipTests test-compile` (or `test`) on a scratch copy, in the sandbox; skipped when disabled |
+| 7 | Build | allowlisted `mvn -B -q -DskipTests test-compile` (or `test`) on a scratch copy, in the sandbox; for Gradle projects `gradle --no-daemon -q testClasses` (or `test`) only when `gradle-enabled=true`; skipped when disabled |
 
 ## 4. Jobs, sessions and progress
 

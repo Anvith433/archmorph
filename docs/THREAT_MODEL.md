@@ -44,7 +44,8 @@ place and what remains.
 
 | Threat | Vector | Mitigation | Residual risk |
 |---|---|---|---|
-| Running uploaded scripts | `mvnw`, `.mvn/`, shell scripts, Git hooks | never executed. Analysis is pure parsing. The build runs on a *copy* without `.mvn/` and `mvnw*`, using the server's own `mvn` | — |
+| Running uploaded scripts | `mvnw`, `.mvn/`, `gradlew`, `gradle/wrapper`, shell scripts, Git hooks | never executed. Analysis is pure parsing; Gradle settings and build scripts are read as text (string literals only), never evaluated. The build runs on a *copy* without `.mvn/`, `mvnw*`, `gradlew*`, `gradle/wrapper/` and `.gradle/`, using the server's own `mvn` / `gradle` | — |
+| Gradle build scripts | `build.gradle(.kts)`, `settings.gradle(.kts)`, `buildSrc`, init scripts | Gradle builds are **disabled by default** (`gradle-enabled=false`) because evaluating a build script runs arbitrary code; when enabled: `--no-daemon`, a dedicated `GRADLE_USER_HOME` (no user init scripts, properties or credentials), cleared environment, same timeout and limits as Maven | when enabled, the build script runs with the server user's privileges; `BuildPluginGuard` does not apply to Gradle |
 | Command-runner plugins | `exec-maven-plugin`, `maven-antrun-plugin`, Groovy, frontend/node, docker, jib, deploy/release/SCM/wagon plugins | `BuildPluginGuard` refuses the build if any `pom.xml` declares one | other plugins and **annotation processors** declared by the project still run arbitrary code during compilation |
 | Credential theft by the build | build reads env vars, `~/.m2/settings.xml`, cloud credentials | environment cleared: only `PATH`, `JAVA_HOME`, `HOME` (an isolated per-project directory), `MAVEN_OPTS`, `LANG` and explicitly configured pass-through variables; separate `maven.repo.local` | the build runs as the server's OS user and can read any file that user can read |
 | Resource exhaustion by the build | infinite loop, fork bomb, huge output | wall-clock timeout (4 min) with process-tree kill; `prlimit` CPU-time and file-size limits when available; output capped and absolute paths masked | memory and process count are not limited without a container |
@@ -52,7 +53,7 @@ place and what remains.
 | Code execution in the parser | malicious source triggering parser bugs | JavaParser parses only (no class loading, no annotation processing); per-file size cap (2 MB); analysis deadline | parser denial-of-service bugs bounded by the analysis timeout |
 
 **Build validation is process-level isolation, not a security boundary.** Compiling a Maven project runs the
-project's plugins and annotation processors. To analyse projects you do not trust, either run ArchMorph in a
+project's plugins and annotation processors; a Gradle build (opt-in) runs its build scripts. To analyse projects you do not trust, either run ArchMorph in a
 disposable container/VM with no credentials and restricted egress, or disable the build level:
 `archmorph.validation.build.enabled=false` (levels 1–6 still run; they never execute uploaded code).
 

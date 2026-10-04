@@ -191,7 +191,7 @@ unsupported, safe, safeWithWarning, conflicts, rewrites), `conflicts` (`{type, t
       "issues": [ { "severity": "WARNING", "file": "src/main/java/com/demo/shared/exception/GlobalExceptionHandler.java", "line": 14,
                     "message": "Shared class GlobalExceptionHandler depends on module 'user' (UserNotFoundException).",
                     "probableCause": "Shared code should not depend on a business module; consider an interface in shared or moving the class." } ] },
-    { "level": "BUILD", "label": "Maven Build", "status": "PASS", "summary": "mvn -B -q -DskipTests test-compile succeeded in 2.648 s", "…": "…" }
+    { "level": "BUILD", "label": "Build", "status": "PASS", "summary": "mvn -B -q -DskipTests test-compile succeeded in 2.648 s", "…": "…" }
   ],
   "build": { "command": ["mvn", "-B", "-q", "-DskipTests", "test-compile"], "exitCode": 0,
              "stdout": "", "stderr": "", "durationMillis": 2648, "timedOut": false, "truncated": false }
