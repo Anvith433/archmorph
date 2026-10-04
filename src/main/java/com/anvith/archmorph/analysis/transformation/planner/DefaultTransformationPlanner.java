@@ -107,6 +107,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         }
 
         applyStringReferenceRules(main, model, plan);
+        applyResourceReferenceRule(main, model);
         applyScanRootRule(main, model);
         stabilise(main, graph, plan, SourceScope.MAIN);
 
@@ -338,6 +339,25 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Resource files are never rewritten. A class whose fully-qualified name appears in one (an OpenAPI spec
+     * naming a validation annotation, {@code spring.factories}, an XML bean definition, ...) therefore stays
+     * where it is, otherwise the build or the runtime would look for it at the old location.
+     */
+    private void applyResourceReferenceRule(List<TransformationPlanEntry> entries, ProjectModel model) {
+        Map<String, TransformationPlanEntry> entryByType = entryIndex(entries);
+        Set<String> tokens = new TreeSet<>();
+        entries.stream().filter(TransformationPlanEntry::isMoved)
+                .forEach(e -> e.getClasses().stream().filter(c -> !c.nested()).forEach(c -> tokens.add(c.sourceQualifiedName())));
+        for (ResourceFinding finding : resourceScanner.scan(model.structure(), tokens)) {
+            TransformationPlanEntry target = entryByType.get(finding.reference());
+            if (target != null && target.isMoved()) {
+                demote(target, SafetyLevel.MANUAL_REVIEW, "its fully-qualified name appears in " + finding.file() + ":"
+                        + finding.line() + "; resource files are not rewritten, so the class stays where it is");
             }
         }
     }
