@@ -128,7 +128,11 @@ rejects the whole request (`400 INVALID_MODULE_OPERATION`) if any decision is in
 Also `INCLUDE_CLASS` and `UNLOCK_CLASS`. Module names must be lower-case Java identifiers and must not be
 reserved (`shared`, `config`, …). Limits: 500 edits, 300-character class names.
 
-Response: `{ suggestion: Module[], decisions: Edit[], finalModules: Module[], warnings: string[], note }` with
+Response: `{ suggestion: Module[], decisions: Edit[], finalModules: Module[], warnings: string[], note, cycles: string[][],
+boundarySuggestions: BoundarySuggestion[] }`. A boundary suggestion is
+`{ id, kind (MOVE_CLASS | SPLIT_FACADE | UNIDIRECTIONAL_RELATIONSHIP | INVERT_DEPENDENCY), from, to, subject, title,
+rationale, dependencyCount, steps[], evidence[], edit }`; `edit` is set for `MOVE_CLASS` and can be appended to
+the decision list to apply it. A module looks like
 
 ```json
 { "name": "order", "category": "BUSINESS_MODULE", "confidence": 0.79, "cohesion": 0.56, "externalCoupling": 0.35,

@@ -69,10 +69,13 @@ public class ApiMapper {
 
     private final ArchMorphProperties properties;
     private final TargetArchitectureResolver architectureResolver;
+    private final com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor;
 
-    public ApiMapper(ArchMorphProperties properties, TargetArchitectureResolver architectureResolver) {
+    public ApiMapper(ArchMorphProperties properties, TargetArchitectureResolver architectureResolver,
+                     com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor) {
         this.properties = properties;
         this.architectureResolver = architectureResolver;
+        this.boundaryAdvisor = boundaryAdvisor;
     }
 
     // ================================================================== project & job
@@ -312,9 +315,13 @@ public class ApiMapper {
         ModuleDiscoveryReport suggestion = session.analysis().suggestion();
         ModuleDiscoveryReport finalReport = session.finalModules() == null ? suggestion : session.finalModules();
         List<String> warnings = new ArrayList<>(finalReport.getWarnings());
+        var boundaries = boundaryAdvisor.advise(finalReport, session.analysis().graph(), session.analysis().facts());
         return new ModuleDtos.ModulesDto(modules(suggestion), session.decisions().stream().map(this::edit).toList(),
                 modules(finalReport), warnings,
-                "Module confidence, cohesion and coupling are static-analysis indicators derived from the dependency graph.");
+                "Module confidence, cohesion and coupling are static-analysis indicators derived from the dependency graph.",
+                boundaries.cycles(), boundaries.suggestions().stream().map(s -> new ModuleDtos.BoundarySuggestionDto(
+                        s.id(), s.kind().name(), s.from(), s.to(), s.subject(), s.title(), s.rationale(), s.dependencyCount(), s.steps(),
+                        s.evidence(), s.edit() == null ? null : edit(s.edit()))).toList());
     }
 
     public List<ModuleDtos.ModuleDto> modules(ModuleDiscoveryReport report) {

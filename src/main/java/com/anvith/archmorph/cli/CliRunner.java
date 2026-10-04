@@ -201,6 +201,15 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         out.println("Candidate modules (static-analysis indicators):");
         session.finalModules().getModules().forEach(m -> out.printf("  %-14s %-16s classes=%-3d confidence=%.2f cohesion=%.2f coupling=%.2f%n",
                 m.getModuleName(), m.getCategory(), m.getClassCount(), m.getConfidence(), m.getCohesion(), m.getExternalCoupling()));
+        var boundaries = workflow.boundaries(session);
+        if (!boundaries.acyclic()) {
+            out.println();
+            out.println("Module cycles: " + String.join("; ", boundaries.cycles().stream().map(c -> String.join(" <-> ", c)).toList()));
+            for (var suggestion : boundaries.suggestions()) {
+                out.printf("  [%s] %s (%s -> %s, %d dependencies)%n", suggestion.kind(), suggestion.title(),
+                        suggestion.from(), suggestion.to(), suggestion.dependencyCount());
+            }
+        }
     }
 
     private void printPlan(TransformationPlan plan) {

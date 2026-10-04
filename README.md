@@ -109,6 +109,11 @@ Every phase returns a structured result; nothing in the pipeline communicates th
   depends on modules but is used by none (a global exception handler) becomes application wiring in the root
   package. An optimizer merges fragments and emits warnings (singleton, oversized, low cohesion, high
   coupling, facades).
+* **Module cycles.** Moving packages cannot remove a cycle that exists in the code, so ArchMorph proposes
+  how to break each one: move a misplaced class (simulated first; one click to apply), split a facade
+  method by method, make a bidirectional JPA association one-directional (naming the fields), or invert a
+  call dependency with an event or interface. The suggestions appear on the Modules page, in the API, the
+  CLI and `MODULES.md`.
 * **Target.** `MODULAR_MONOLITH` (default): a class used by another module goes to the module root package
   (public API), everything else into internal sub-packages. `MODULAR_BY_DOMAIN`:
   `<base>.modules.<module>.<layer>`. Choose per project in the UI, with `PUT /strategy` or `--strategy`.

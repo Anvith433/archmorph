@@ -60,6 +60,7 @@ public class ProjectWorkflow {
     private final DiffService diffService;
     private final com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures;
     private final com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation;
+    private final com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor;
     private final ArchMorphProperties properties;
 
     public ProjectWorkflow(ZipExtractionService extractor, ProjectAnalyzer analyzer, ModuleEditService editService,
@@ -67,6 +68,7 @@ public class ProjectWorkflow {
                            ReportService reports, SourceRewriter rewriter, DiffService diffService,
                            com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures,
                            com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation,
+                           com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor,
                            ArchMorphProperties properties) {
         this.extractor = extractor;
         this.analyzer = analyzer;
@@ -79,6 +81,7 @@ public class ProjectWorkflow {
         this.diffService = diffService;
         this.architectures = architectures;
         this.moduleDocumentation = moduleDocumentation;
+        this.boundaryAdvisor = boundaryAdvisor;
         this.properties = properties;
     }
 
@@ -179,12 +182,18 @@ public class ProjectWorkflow {
         }
         ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
         String markdown = moduleDocumentation.render(session.displayName(), session.plan(), modules, session.analysis().graph(),
-                architectures.resolve(session.plan().getStrategy()));
+                architectures.resolve(session.plan().getStrategy()), boundaries(session));
         try {
             Files.writeString(target, markdown, java.nio.charset.StandardCharsets.UTF_8);
         } catch (java.io.IOException e) {
             throw new com.anvith.archmorph.common.exception.WorkspaceCreationException("Unable to write the module documentation.", e);
         }
+    }
+
+    /** Module cycles of the current module assignment and how to break them. */
+    public com.anvith.archmorph.analysis.module.boundary.BoundaryReport boundaries(ProjectSession session) {
+        ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+        return boundaryAdvisor.advise(modules, session.analysis().graph(), session.analysis().facts());
     }
 
     public TargetStrategy strategyOf(ProjectSession session) {

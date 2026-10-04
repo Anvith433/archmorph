@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { ModuleEdit, Modules as ModulesData } from '../api/types';
 import { ErrorPanel } from '../components/ErrorPanel';
+import { CyclePanel } from '../components/CyclePanel';
 import { ModuleCard } from '../components/ModuleCard';
 import { Badge, Button, Panel, Skeleton } from '../components/ui';
 import { useProject } from '../hooks/ProjectContext';
@@ -100,6 +101,15 @@ export function Modules() {
         <ul className="space-y-1 rounded-lg border border-warn/30 bg-warn-soft px-4 py-3 text-sm">
           {data.warnings.map((w) => <li key={w} className="text-fg">{w}</li>)}
         </ul>
+      )}
+
+      {view === 'final' && (
+        <CyclePanel
+          cycles={data.cycles ?? []}
+          suggestions={data.boundarySuggestions ?? []}
+          editable={editable && !saving}
+          onApply={(edit) => void submit([...data.decisions, edit])}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_300px]">

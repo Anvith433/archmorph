@@ -34,6 +34,12 @@ public class ModuleDocumentation {
 
     public String render(String projectName, TransformationPlan plan, ModuleDiscoveryReport modules, DependencyGraph graph,
                          TargetArchitecture architecture) {
+        return render(projectName, plan, modules, graph, architecture,
+                com.anvith.archmorph.analysis.module.boundary.BoundaryReport.empty());
+    }
+
+    public String render(String projectName, TransformationPlan plan, ModuleDiscoveryReport modules, DependencyGraph graph,
+                         TargetArchitecture architecture, com.anvith.archmorph.analysis.module.boundary.BoundaryReport boundaries) {
         String base = plan.getBasePackage();
         Map<String, TransformationPlanEntry> entryByType = new TreeMap<>();
         for (TransformationPlanEntry entry : plan.getEntries()) {
@@ -103,6 +109,24 @@ public class ModuleDocumentation {
                 module.getWarnings().forEach(w -> md.append("- ").append(w.replaceFirst("^\\[opt\\] ", "")).append('\n'));
             }
             md.append('\n');
+        }
+
+        if (!boundaries.cycles().isEmpty()) {
+            md.append("## Module cycles and how to break them\n\n");
+            md.append("These modules depend on each other: ");
+            md.append(String.join("; ", boundaries.cycles().stream().map(c -> String.join(" ↔ ", c)).toList()));
+            md.append(". Moving packages cannot remove a cycle that exists in the code. Each suggestion below removes "
+                    + "one module dependency; together they make the module graph acyclic.\n\n");
+            for (var suggestion : boundaries.suggestions()) {
+                md.append("### ").append(suggestion.title()).append("\n\n");
+                md.append("`").append(suggestion.from()).append("` → `").append(suggestion.to()).append("`, ")
+                        .append(suggestion.dependencyCount()).append(" class-level dependencies. ")
+                        .append(suggestion.rationale()).append("\n\n");
+                suggestion.steps().forEach(step -> md.append("1. ").append(step).append('\n'));
+                md.append("\n<details><summary>Dependencies removed</summary>\n\n");
+                suggestion.evidence().forEach(e -> md.append("- ").append(e).append('\n'));
+                md.append("\n</details>\n\n");
+            }
         }
 
         List<TransformationPlanEntry> kept = plan.getEntries().stream()

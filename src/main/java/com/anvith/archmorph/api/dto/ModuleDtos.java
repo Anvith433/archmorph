@@ -31,7 +31,14 @@ public final class ModuleDtos {
     public record UpdateModulesRequest(@NotNull @Size(max = 500) List<ModuleEditDto> edits) {
     }
 
+    /** A proposal for breaking one module dependency that closes a cycle; {@code edit} applies it when present. */
+    public record BoundarySuggestionDto(String id, String kind, String from, String to, String subject, String title,
+                                        String rationale,
+                                        int dependencyCount, List<String> steps, List<String> evidence, ModuleEditDto edit) {
+    }
+
     public record ModulesDto(List<ModuleDto> suggestion, List<ModuleEditDto> decisions, List<ModuleDto> finalModules,
-                             List<String> warnings, String note) {
+                             List<String> warnings, String note, List<List<String>> cycles,
+                             List<BoundarySuggestionDto> boundarySuggestions) {
     }
 }

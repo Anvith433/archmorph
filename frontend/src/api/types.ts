@@ -248,12 +248,30 @@ export interface ModuleEdit {
   classes?: string[] | null;
 }
 
+export type SuggestionKind = 'MOVE_CLASS' | 'UNIDIRECTIONAL_RELATIONSHIP' | 'SPLIT_FACADE' | 'INVERT_DEPENDENCY';
+
+export interface BoundarySuggestion {
+  id: string;
+  kind: SuggestionKind;
+  from: string;
+  to: string;
+  subject?: string | null;
+  title: string;
+  rationale: string;
+  dependencyCount: number;
+  steps: string[];
+  evidence: string[];
+  edit?: ModuleEdit | null;
+}
+
 export interface Modules {
   suggestion: Module[];
   decisions: ModuleEdit[];
   finalModules: Module[];
   warnings: string[];
   note: string;
+  cycles: string[][];
+  boundarySuggestions: BoundarySuggestion[];
 }
 
 export interface PlanEntry {

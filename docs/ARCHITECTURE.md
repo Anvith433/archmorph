@@ -168,7 +168,24 @@ Module names come from `DefaultModuleNamingStrategy` (lower-case Java identifier
 rejected with `INVALID_MODULE_OPERATION`; nothing is partially applied. Suggestion, decisions and final
 modules are all exposed so the UI can show them side by side. Every accepted edit re-plans.
 
-### 3.6 Planning, rewriting, validation
+### 3.6 Module cycles and suggestions
+
+`BoundaryAdvisor` builds the module-level dependency graph from the final assignment and finds cycles
+(Tarjan). It then works greedily until the modules are acyclic, keeping a working copy of the assignment so
+suggestions build on each other:
+
+1. **Split a facade** — a non-controller class reaching into three or more modules inside the cycle. Its
+   public methods are grouped by the module whose types they use; the facade and its interface or
+   implementation count as one, and all dependencies running through them are listed.
+2. **Move a class** — a class that causes a whole module dependency and has more ties to the other module
+   than to its own. The move is simulated on the dependency graph and only suggested when it separates the
+   modules without creating a new cycle. It is returned as a `MOVE_CLASS` module edit, so it can be applied.
+3. Otherwise the **lightest** module dependency of the cycle is broken. The cost is the sum of the
+   dependency weights; the inverse side of a JPA association (`@OneToMany`, `@ManyToMany`) costs a quarter,
+   because removing it keeps the mapping intact. Entity links become **one-directional relationship**
+   suggestions naming the fields; other code becomes **invert the dependency** (domain event or interface).
+
+### 3.7 Planning, rewriting, validation
 
 See [TRANSFORMATION_ENGINE.md](TRANSFORMATION_ENGINE.md). Validation levels, in order:
 
