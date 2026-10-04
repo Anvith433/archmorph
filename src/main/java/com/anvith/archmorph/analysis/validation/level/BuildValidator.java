@@ -147,7 +147,10 @@ public class BuildValidator {
                         List.of(), millis);
             }
             String first = all.lines().filter(l -> l.contains("[ERROR]") || l.startsWith("FAILURE:") || l.contains("What went wrong")).findFirst().orElse(tool + " reported a failure.").trim();
-            issues.add(ValidationIssue.error(null, 0, truncate(first), "See the captured build output."));
+            issues.add(ValidationIssue.error(null, 0, truncate(first), "Gradle".equals(tool)
+                    ? "No compiler error was reported. Check the captured output: a Gradle or plugin version mismatch "
+                    + "with the project's wrapper fails the original project in the same way."
+                    : "See the captured build output."));
         }
         return LevelResult.of(level, issues, "build succeeded", millis);
     }

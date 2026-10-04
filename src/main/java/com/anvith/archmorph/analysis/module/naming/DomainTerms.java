@@ -28,7 +28,12 @@ public final class DomainTerms {
             "Projection", "Summary", "Details", "Detail", "Info", "Data", "Client", "Gateway", "Adapter",
             "Factory", "Builder", "Helper", "Utils", "Util", "Config", "Configuration", "Properties",
             "Status", "Type", "Test", "Tests", "IT", "RowMapper", "ResultSetExtractor", "Extractor", "Override",
-            "Custom", "Advice", "Aspect", "Api", "Initializer", "Loader", "Runner", "Scheduler");
+            "Custom", "Advice", "Aspect", "Api", "Initializer", "Loader", "Runner", "Scheduler",
+            // GraphQL
+            "DataFetcher", "Datafetcher", "Fetcher", "Mutation", "Resolver", "Subscription",
+            "Serializer", "Deserializer", "Codec",
+            // view models (JHipster LoginVM, ManagedUserVM)
+            "VM", "Vm", "ViewModel");
 
     private static List<String> longestFirst(String... values) {
         return java.util.Arrays.stream(values)
@@ -42,12 +47,14 @@ public final class DomainTerms {
      */
     private static final List<String> TECHNOLOGY_PREFIXES = List.of(
             "SpringData", "Jdbc", "Jpa", "Jdbi", "Jooq", "MyBatis", "Mybatis", "Hibernate", "Mongo", "Redis", "Elastic",
-            "Cassandra", "Neo4j", "R2dbc", "Kafka", "Rabbit", "Jms", "Rest", "Http", "Grpc", "GraphQl", "Graphql", "Soap",
+            "Cassandra", "Neo4j", "R2dbc", "Kafka", "Rabbit", "Jms", "Rest", "Http", "Grpc", "GraphQL", "GraphQl", "Graphql", "Soap",
             "Feign", "Cached", "Caching", "InMemory", "Mock", "Fake", "Stub");
 
     private static final List<String> VERB_PREFIXES = List.of(
             "Create", "Update", "Delete", "Get", "List", "Find", "Search", "Add", "Remove", "Patch", "Save",
-            "New", "Edit", "Register", "Upsert", "Default", "Abstract", "Base", "Simple", "Paged", "Page");
+            "New", "Edit", "Register", "Upsert", "Default", "Abstract", "Base", "Simple", "Paged", "Page",
+            // qualifiers: CurrentUserApi and MeController are about the user, not a "currentuser" domain
+            "Current", "My", "Me");
 
     /** Terms that never name a business module. */
     public static final Set<String> GENERIC_TERMS = Set.copyOf(List.of(
@@ -61,7 +68,10 @@ public final class DomainTerms {
             "processor", "manager", "handler", "provider", "factory", "builder", "service", "controller",
             "repository", "facade", "adapter", "listener", "validator", "converter", "mapper", "client",
             "gateway", "task", "job", "worker", "runner", "component", "bean", "context", "registry",
-            "strategy", "wrapper", "helper", "foo", "bar", "baz", "main", "type", "status"));
+            "strategy", "wrapper", "helper", "foo", "bar", "baz", "main", "type", "status",
+            // cross-cutting technical concerns
+            "security", "authentication", "authorization", "field", "cursor", "pager", "me", "customize", "customized",
+            "authenticate", "login", "logout", "logging", "log", "meter", "metric", "vm"));
 
     /** Domain stem of a class name: role suffixes and verb prefixes removed, lower case. */
     public static String stem(String className) {

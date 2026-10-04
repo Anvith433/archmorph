@@ -25,6 +25,24 @@ class DomainTermsTest {
     }
 
     @Test
+    void graphQlRolesQualifiersAndCrossCuttingConcernsAreNotDomains() {
+        assertThat(DomainTerms.stem("ArticleDatafetcher")).isEqualTo("article");
+        assertThat(DomainTerms.stem("CommentMutation")).isEqualTo("comment");
+        assertThat(DomainTerms.stem("GraphQLCustomizeExceptionHandler")).isEqualTo("customize");
+        assertThat(DomainTerms.isGenericName("GraphQLCustomizeExceptionHandler")).isTrue();
+        assertThat(DomainTerms.stem("CurrentUserApi")).isEqualTo("user");
+        assertThat(DomainTerms.stem("ErrorResourceSerializer")).isEqualTo("error");
+        assertThat(DomainTerms.isGenericName("SecurityUtil")).isTrue();
+        assertThat(DomainTerms.isGenericName("FieldErrorResource")).isTrue();
+        assertThat(DomainTerms.isGenericName("AuthorizationService")).isTrue();
+        assertThat(DomainTerms.stem("ManagedUserVM")).isEqualTo("manageduser");
+        assertThat(DomainTerms.isGenericName("LoginVM")).isTrue();
+        assertThat(DomainTerms.isGenericName("SecurityMetersService")).isTrue();
+        assertThat(DomainTerms.isGenericName("LoggingAspect")).isTrue();
+        assertThat(DomainTerms.stem("MessageService")).as("'Me' is only a prefix before a capital").isEqualTo("message");
+    }
+
+    @Test
     void pathTermsIgnoreVersionsAndVariables() {
         assertThat(DomainTerms.pathTerms("/api/v1/order-items/{id}")).containsExactly("orderitem");
     }

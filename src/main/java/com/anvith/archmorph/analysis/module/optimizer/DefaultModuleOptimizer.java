@@ -71,6 +71,7 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
         promoteSharedSupertypes(report, graph);
         mergeFragments(report, graph);
         promoteShared(report, graph, config);
+        moveAdaptersToTheirPort(report, graph);
         moveCompositionRoots(report, graph);
         enforceSingleOwnership(report);
         report.pruneEmptyModules();
@@ -297,6 +298,44 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
     }
 
     /**
+     * An implementation of a module's interface ({@code MyBatisCommentRepository implements CommentRepository},
+     * {@code DefaultJwtService implements JwtService}) is that module's adapter: it belongs with the port it
+     * implements, not in shared (a shared → module dependency) or at the application root. Applies only when
+     * every implemented project type belongs to the same business module.
+     */
+    private void moveAdaptersToTheirPort(ModuleDiscoveryReport report, DependencyGraph graph) {
+        ModuleInfo shared = report.getModule(ModuleDiscoveryReport.SHARED);
+        if (shared == null) {
+            return;
+        }
+        for (DependencyNode node : new ArrayList<>(shared.getClasses())) {
+            ClassAssignment assignment = report.getAssignment(node.getId());
+            if (assignment != null && assignment.locked()) {
+                continue;
+            }
+            Set<String> portModules = new java.util.TreeSet<>();
+            Set<String> ports = new java.util.TreeSet<>();
+            for (var edge : graph.getOutgoingEdges(node)) {
+                if (!SUBTYPING.contains(edge.getDependencyType())) {
+                    continue;
+                }
+                String owner = report.moduleOf(edge.getTarget().getId());
+                ModuleInfo module = owner == null ? null : report.getModule(owner);
+                portModules.add(module != null && module.isBusinessModule() ? owner : "");
+                ports.add(edge.getTarget().getClassName());
+            }
+            if (portModules.size() != 1 || portModules.contains("")) {
+                continue;
+            }
+            String target = portModules.iterator().next();
+            report.assign(node, target, ModuleCategory.BUSINESS_MODULE, 0.8, ClassAssignment.Origin.AUTOMATIC,
+                    List.of("implements " + String.join(", ", ports) + " of module '" + target
+                            + "': an adapter belongs with the port it implements"));
+        }
+        report.pruneEmptyModules();
+    }
+
+    /**
      * Shared code that depends on business modules but is used by none of them is application wiring — a
      * global {@code @RestControllerAdvice} handling module exceptions, a security configuration that uses a
      * module's {@code UserDetailsService}. In shared it would create a shared ↔ module cycle; at the
@@ -330,6 +369,13 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
             if (usedByModules) {
                 report.getWarnings().add("Shared class " + node.getClassName() + " depends on modules " + uses
                         + " and is used by other code; this is a dependency cycle to resolve by design (an interface or event in shared).");
+                continue;
+            }
+            if (uses.size() == 1 && node.getComponentType() == ComponentType.CONTROLLER) {
+                // an endpoint the framework calls (e.g. a GraphQL "me" query) that serves exactly one module
+                String target = uses.iterator().next();
+                report.assign(node, target, ModuleCategory.BUSINESS_MODULE, 0.7, ClassAssignment.Origin.AUTOMATIC,
+                        List.of("endpoint that only uses module '" + target + "'"));
                 continue;
             }
             report.assign(node, ModuleDiscoveryReport.APPLICATION, ModuleCategory.APPLICATION, 0.8,

@@ -59,6 +59,19 @@ reports cycles there (bidirectional JPA relations such as Owner ↔ Pet, and the
 decisions that moving packages cannot make, and ArchMorph reports them as warnings. On the `spring-layered`
 fixture, the transformed project passes `ApplicationModules.verify()` as well as its tests.
 
+Also run on [spring-boot-realworld-example-app](https://github.com/gothinkster/spring-boot-realworld-example-app)
+(Gradle, ports and adapters, MyBatis, Netflix DGS GraphQL, Lombok; 116 files) and
+[jhipster-sample-app](https://github.com/jhipster/jhipster-sample-app) (Maven, JHipster layout; 136 files).
+Both transform with levels 1–6 passing and every original dependency preserved. On realworld the modules are
+article, comment, profile, tag and user, plus a low-confidence one-class `relation` module (the follow/unfollow
+mutation) that a reviewer would merge into profile; entities and mappers named in MyBatis XML stay in place for manual
+review, because moving them would break the mappers. On JHipster the modules are account, authority,
+bankaccount, label, operation and user; two different `EmailAlreadyUsedException` classes would collide in
+`shared`, so both are kept in place and reported as a conflict. Neither build was run here: realworld pins
+Gradle 7.4 / Spring Boot 2.6, which the server's Gradle 8 cannot build (the original fails the same way, and
+ArchMorph reports the pinned wrapper version), and JHipster declares node/npm build plugins that the build
+guard refuses. Lessons from these runs are captured in the `ports-and-adapters` fixture.
+
 | Area | State |
 |---|---|
 | Upload, safe extraction, workspace isolation | implemented, tested against Zip Slip, bombs, symlinks |
@@ -284,10 +297,11 @@ cd frontend && npm run typecheck && npm run build
 ./mvnw test -Dtest=SourceRewriterGoldenTest -Dgolden.update=true   # regenerate golden files (review the diff!)
 ```
 
-* **18 fixture projects** (`src/test/resources/fixtures`) with `expected.json` expectations: layered,
+* **19 fixture projects** (`src/test/resources/fixtures`) with `expected.json` expectations: layered,
   shared components, cycles, ambiguous modules, duplicate class names, nested classes, generics,
   multi-package, default package, malformed Java, security configuration, reflection, Lombok/MapStruct,
-  a real-world style project, multi-module Maven (nested aggregator), Gradle single and multi-project builds.
+  a real-world style project, ports and adapters, multi-module Maven (nested aggregator), Gradle single and
+  multi-project builds.
 * **Golden rewriter tests** (`src/test/resources/golden/rewriter`): wildcard and static imports, qualified
   references, nested classes, import ordering, CRLF, comments inside the import block, untouched files.
 * **Invariant tests** on every fixture: no lost files, unique destinations, package = directory, no stale

@@ -2,7 +2,9 @@ package com.anvith.archmorph.parser;
 
 import com.anvith.archmorph.support.Fixtures;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +60,19 @@ class ProjectStructureDetectorTest {
                 .containsExactlyInAnyOrder("clinic-core/src/main/java", "clinic-app/src/main/java");
         assertThat(structure.testSourceRoots()).extracting(root -> relative(structure, root))
                 .containsExactly("clinic-core/src/test/java");
+    }
+
+    @Test
+    void gradleWrapperVersionIsReportedButNeverRun(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("build.gradle"), "plugins { id 'java' }");
+        Files.createDirectories(dir.resolve("src/main/java"));
+        Files.createDirectories(dir.resolve("gradle/wrapper"));
+        Files.writeString(dir.resolve("gradle/wrapper/gradle-wrapper.properties"),
+                "distributionUrl=https\\://services.gradle.org/distributions/gradle-7.4-bin.zip\n");
+
+        ProjectStructure structure = detector.detect(dir);
+
+        assertThat(structure.warnings()).anyMatch(w -> w.contains("pins Gradle 7.4") && w.contains("version mismatch"));
     }
 
     private static String relative(ProjectStructure structure, Path root) {

@@ -188,6 +188,9 @@ public class ProjectStructureDetector {
         }
         warnings.add("Gradle build: build scripts are code and are never executed unless "
                 + "archmorph.validation.build.gradle-enabled=true (the uploaded gradlew is never run).");
+        gradleWrapperVersion(root).ifPresent(version -> warnings.add("The Gradle wrapper pins Gradle " + version
+                + ". The wrapper is never run: build validation uses the server's Gradle, so a build failure can come "
+                + "from a Gradle version mismatch rather than from the transformation."));
         if (annotationProcessors) {
             warnings.add("Annotation processors are configured. Generated sources may reference old packages until they are regenerated.");
         }
@@ -245,6 +248,15 @@ public class ProjectStructureDetector {
             }
         }
         return result;
+    }
+
+    private static final java.util.regex.Pattern WRAPPER_VERSION =
+            java.util.regex.Pattern.compile("distributionUrl=.*gradle-(\\d+(?:\\.\\d+){0,2})-(?:bin|all)\\.zip");
+
+    /** Gradle version pinned by {@code gradle/wrapper/gradle-wrapper.properties}, read as text. */
+    static Optional<String> gradleWrapperVersion(Path root) {
+        java.util.regex.Matcher matcher = WRAPPER_VERSION.matcher(readQuietly(root.resolve("gradle/wrapper/gradle-wrapper.properties")));
+        return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
     }
 
     private static Optional<String> gradleString(String script, String key) {
@@ -338,7 +350,7 @@ public class ProjectStructureDetector {
         return null;
     }
 
-    private String readQuietly(Path file) {
+    private static String readQuietly(Path file) {
         try {
             return Files.readString(file);
         } catch (IOException | RuntimeException e) {
