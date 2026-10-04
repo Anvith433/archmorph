@@ -1,0 +1,23 @@
+{
+  "description": "Lombok (@Data getters, @RequiredArgsConstructor) and MapStruct (a java(...) expression naming a class by its fully-qualified name). Compiles with the Lombok and MapStruct annotation processors; the in-JVM compiler of the test suite has no MapStruct, so `compiles` is false here and Maven verifies it instead.",
+  "modules": [
+    "customer",
+    "order"
+  ],
+  "moved": {
+    "com.shop.model.Customer": "com.shop.customer.Customer",
+    "com.shop.model.Order": "com.shop.order.entity.Order",
+    "com.shop.util.OrderTotals": "com.shop.order.common.OrderTotals",
+    "com.shop.mapper.OrderMapper": "com.shop.order.common.OrderMapper"
+  },
+  "kept": [
+    "com.shop.ShopApplication"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": false,
+  "strategy": "MODULAR_MONOLITH"
+}

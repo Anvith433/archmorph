@@ -50,7 +50,8 @@ public final class Projects {
                 new ConstructorDependencyExtractor(), new MethodSignatureDependencyExtractor(),
                 new MethodInvocationDependencyExtractor(), new ObjectCreationDependencyExtractor(),
                 new InheritanceDependencyExtractor(), new AnnotationDependencyExtractor(),
-                new TypeReferenceDependencyExtractor()));
+                new TypeReferenceDependencyExtractor(),
+                new com.anvith.archmorph.analysis.dependency.extractor.EmbeddedJavaDependencyExtractor()));
         return builder.build(model, Set.of(), true).graph();
     }
 }

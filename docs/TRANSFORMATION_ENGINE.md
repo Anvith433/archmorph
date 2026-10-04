@@ -169,9 +169,11 @@ fires (each pass only demotes, so the loop terminates):
 3. Implicit visibility that the move breaks is made explicit: a class that used a same-package neighbour
    without an import gets an import when the two are separated.
 4. Obsolete imports are removed (the imported class is now in the same package).
-5. Fully-qualified references in code — types, `new` expressions, static field access, annotations, casts,
+5. Fully-qualified names inside MapStruct `java(...)` expressions (`expression`, `defaultExpression`,
+   `conditionExpression`), which MapStruct copies into the generated mapper; other strings are never changed.
+6. Fully-qualified references in code — types, `new` expressions, static field access, annotations, casts,
    generic arguments, local variable types — and exact fully-qualified names in comments and Javadoc.
-6. External and unrelated imports are left untouched.
+7. External and unrelated imports are left untouched.
 
 ### 4.2 How
 

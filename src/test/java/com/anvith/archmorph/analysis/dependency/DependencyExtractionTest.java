@@ -34,6 +34,47 @@ class DependencyExtractionTest {
     }
 
     @Test
+    void lombokGettersAndRecordAccessorsAreFollowed() throws Exception {
+        ProjectModel model = Projects.model(temp, Map.of(
+                "com/shop/Customer.java", "package com.shop; import lombok.Data; @Data public class Customer { private String name; private Address address; }",
+                "com/shop/Address.java", "package com.shop.geo; public class Address { }".replace("com.shop.geo", "com.shop"),
+                "com/shop/Order.java", "package com.shop; import lombok.Getter; public class Order { @Getter private Customer customer; private Customer hidden; }",
+                "com/shop/Line.java", "package com.shop; public record Line(Order order, int quantity) { }",
+                "com/shop/Report.java", """
+                        package com.shop;
+                        public class Report {
+                            public String of(Order order, Line line) {
+                                return order.getCustomer().getAddress() + " " + line.order().getCustomer().getName();
+                            }
+                        }"""));
+        DependencyGraph graph = Projects.graph(model);
+
+        // order.getCustomer() (field-level @Getter) → Customer; .getAddress() (class-level @Data) → Address
+        assertThat(edge(graph, "com.shop.Report", "com.shop.Customer", DependencyType.METHOD_INVOCATION)).isTrue();
+        assertThat(edge(graph, "com.shop.Report", "com.shop.Address", DependencyType.METHOD_INVOCATION)).isFalse(); // getAddress() is the last call: no further call on Address
+        // line.order() (record accessor) → Order
+        assertThat(edge(graph, "com.shop.Report", "com.shop.Order", DependencyType.METHOD_INVOCATION)).isTrue();
+    }
+
+    @Test
+    void classesNamedInMapStructExpressionsAreDependencies() throws Exception {
+        ProjectModel model = Projects.model(temp, Map.of(
+                "com/shop/util/Totals.java", "package com.shop.util; public final class Totals { public static String format(Object o) { return \"\"; } }",
+                "com/shop/mapper/OrderMapper.java", """
+                        package com.shop.mapper;
+                        import org.mapstruct.Mapper;
+                        import org.mapstruct.Mapping;
+                        @Mapper
+                        public interface OrderMapper {
+                            @Mapping(target = "total", expression = "java(com.shop.util.Totals.format(order))")
+                            @Mapping(target = "label", constant = "not java(com.shop.util.Totals)")
+                            String toDto(Object order);
+                        }"""));
+        DependencyGraph graph = Projects.graph(model);
+        assertThat(edge(graph, "com.shop.mapper.OrderMapper", "com.shop.util.Totals", DependencyType.TYPE_REFERENCE)).isTrue();
+    }
+
+    @Test
     void extractsEveryDependencyKind() throws Exception {
         ProjectModel model = Projects.model(temp, Map.of(
                 "com/x/Base.java", "package com.x; public class Base {}",

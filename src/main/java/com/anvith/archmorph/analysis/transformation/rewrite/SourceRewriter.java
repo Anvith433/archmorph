@@ -100,6 +100,7 @@ public class SourceRewriter {
 
         int qualified = qualifiedEdits(references, classMap, lines, edits);
         commentEdits(cu, classMap, source, lines, edits);
+        embeddedJavaEdits(cu, classMap, source, lines, edits);
         ImportPlan importPlan = planImports(cu, newPackage, classMap, registry, references, importChanges, warnings);
         boolean packageChanged = !oldPackage.equals(newPackage);
         headerEdits(cu, source, lines, newPackage, packageChanged, importPlan, edits, warnings);
@@ -151,6 +152,30 @@ public class SourceRewriter {
             }
             int start = lines.offset(comment.getBegin().get());
             int end = lines.offset(comment.getEnd().get()) + 1;
+            String text = source.substring(start, end);
+            String updated = text;
+            for (Map.Entry<String, String> entry : classMap.entrySet()) {
+                if (!entry.getKey().equals(entry.getValue()) && updated.contains(entry.getKey())) {
+                    updated = Pattern.compile("(?<![A-Za-z0-9_$.])" + Pattern.quote(entry.getKey()) + "(?![A-Za-z0-9_$])")
+                            .matcher(updated).replaceAll(Matcher.quoteReplacement(entry.getValue()));
+                }
+            }
+            if (!updated.equals(text)) {
+                edits.add(new Edit(start, end, updated));
+            }
+        }
+    }
+
+    /** Exact fully-qualified names of moved classes in embedded Java code, e.g. MapStruct {@code expression = "java(...)"}. */
+    private void embeddedJavaEdits(CompilationUnit cu, Map<String, String> classMap, String source, LineIndex lines,
+                                   List<Edit> edits) {
+        for (com.github.javaparser.ast.expr.StringLiteralExpr literal : cu.findAll(com.github.javaparser.ast.expr.StringLiteralExpr.class)) {
+            if (!com.anvith.archmorph.parser.EmbeddedJava.isEmbeddedJava(literal)
+                    || literal.getBegin().isEmpty() || literal.getEnd().isEmpty()) {
+                continue;
+            }
+            int start = lines.offset(literal.getBegin().get());
+            int end = lines.offset(literal.getEnd().get()) + 1;
             String text = source.substring(start, end);
             String updated = text;
             for (Map.Entry<String, String> entry : classMap.entrySet()) {

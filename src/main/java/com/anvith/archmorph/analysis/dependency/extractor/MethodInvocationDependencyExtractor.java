@@ -15,7 +15,8 @@ import java.util.Optional;
 /**
  * Calls on project types: {@code userService.createUser(...)},
  * {@code UserMapper.toDto(user)} and, through the symbol solver,
- * chained calls such as {@code order.getCustomer().getAddress()}.
+ * chained calls such as {@code order.getCustomer().getAddress()} — including Lombok-generated getters and
+ * record accessors, which are inferred from the declared fields when the solver cannot see them.
  */
 @Component
 @Order(40)
@@ -47,7 +48,13 @@ public class MethodInvocationDependencyExtractor implements DependencyExtractor 
                 return;
             }
         }
-        context.solveExpressionType(scope)
+        Optional<String> solved = context.solveExpressionType(scope);
+        if (solved.isPresent()) {
+            context.connectQualified(solved.get(), DependencyType.METHOD_INVOCATION, call);
+            return;
+        }
+        // getters the solver cannot see: Lombok-generated ones and record accessors
+        context.inferProjectType(scope, call)
                 .ifPresent(qualified -> context.connectQualified(qualified, DependencyType.METHOD_INVOCATION, call));
     }
 }

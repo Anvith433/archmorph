@@ -51,7 +51,10 @@ class FixtureExpectationsTest {
     @MethodSource("fixtures")
     void fixtureBehavesAsExpected(String fixture) throws Exception {
         JsonNode expected = JsonMapper.builder().build().readTree(Fixtures.path(fixture).resolve("expected.json").toFile());
-        PipelineRunner.Run run = runner.run(fixture, temp);
+        // expectations are written for MODULAR_BY_DOMAIN unless the fixture names another strategy
+        var strategy = com.anvith.archmorph.analysis.transformation.target.TargetStrategy.valueOf(
+                expected.path("strategy").asString("MODULAR_BY_DOMAIN"));
+        PipelineRunner.Run run = runner.run(fixture, temp, strategy);
 
         // ---- modules
         Set<String> businessModules = run.analysis().suggestion().getBusinessModules().stream()
