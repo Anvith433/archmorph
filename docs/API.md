@@ -36,7 +36,9 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/modules` | suggestion, user decisions, final modules | `200` |
 | `PUT` | `/projects/{projectId}/modules` | replace the list of user decisions; re-plans | `200` modules |
 | `PUT` | `/projects/{projectId}/strategy` | choose the target layout `{"strategy": "MODULAR_MONOLITH" \| "MODULAR_BY_DOMAIN", "addModulithVerification": true}` (the flag is optional); re-plans | `200` plan |
-| `GET` | `/projects/{projectId}/plan` | transformation plan | `200` |
+| `GET` | `/projects/{projectId}/plan` | transformation plan; `?strategy=MODULAR_BY_DOMAIN` previews another layout without changing anything | `200` |
+| `GET` | `/projects/{projectId}/decisions` | the review as a portable file: `{version, strategy, addModulithVerification, edits}` | `200` |
+| `PUT` | `/projects/{projectId}/decisions` | apply a saved review in one step (all or nothing) | `200` |
 | `GET` | `/projects/{projectId}/diff/{entryId}` | before/after and unified diff for one plan entry | `200` |
 | `POST` | `/projects/{projectId}/transform?dryRun=true` | rewrite everything in memory; nothing written | `200` |
 | `POST` | `/projects/{projectId}/transform` | transform, then validate (job) | `202` |
@@ -125,7 +127,10 @@ rejects the whole request (`400 INVALID_MODULE_OPERATION`) if any decision is in
 ] }
 ```
 
-Also `INCLUDE_CLASS` and `UNLOCK_CLASS`. Module names must be lower-case Java identifiers and must not be
+Also `INCLUDE_CLASS` and `UNLOCK_CLASS`, and for the modular-monolith layout `EXPOSE_CLASS` (always in the
+module's public API), `INTERNAL_CLASS` (always internal — rejected while another module uses the class, naming
+the users) and `AUTO_EXPOSURE` (back to automatic). Module classes carry `exposure` (`PUBLIC_API`/`INTERNAL`)
+and `exposureOverride`. Module names must be lower-case Java identifiers and must not be
 reserved (`shared`, `config`, …). Limits: 500 edits, 300-character class names.
 
 Response: `{ suggestion: Module[], decisions: Edit[], finalModules: Module[], warnings: string[], note, cycles: string[][],

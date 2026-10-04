@@ -224,6 +224,11 @@ class ProjectApiIntegrationTest {
         assertThat(plan.get("classMap").get("com.demo.service.UserService").asString()).isEqualTo("com.demo.user.UserService");
         assertThat(plan.get("classMap").get("com.demo.controller.UserController").asString())
                 .isEqualTo("com.demo.user.controller.UserController");
+        JsonNode preview = api.data(api.get(p + "/plan?strategy=MODULAR_BY_DOMAIN"));
+        assertThat(preview.get("classMap").get("com.demo.service.UserService").asString())
+                .isEqualTo("com.demo.modules.user.service.UserService");
+        assertThat(api.data(api.get(p + "/plan")).get("strategy").asString()).as("preview changes nothing").isEqualTo("MODULAR_MONOLITH");
+        assertThat(api.get(p + "/plan?strategy=NOPE").statusCode()).isEqualTo(400);
         JsonNode proposed = api.data(api.get(p + "/architecture")).get("proposed");
         assertThat(proposed.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
         assertThat(proposed.get("modules").toString()).contains("(api)");
@@ -245,6 +250,21 @@ class ProjectApiIntegrationTest {
                 assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
             }
         }
+
+        // the review can be exported and replayed on a fresh upload of the same project
+        JsonNode exported = api.data(api.get(p + "/decisions"));
+        assertThat(exported.get("version").asInt()).isEqualTo(1);
+        assertThat(exported.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(exported.get("addModulithVerification").asBoolean()).isTrue();
+        JsonNode second = api.data(api.upload(ApiClient.zipFixture("spring-layered"), "shop.zip"));
+        api.awaitJob(second.get("jobId").asString());
+        String p2 = "/api/v1/projects/" + second.get("projectId").asString();
+        HttpResponse<String> replay = api.send("PUT", p2 + "/decisions", exported.toString());
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(api.data(api.get(p2 + "/plan")).get("modulithVerification").asBoolean()).isTrue();
+        HttpResponse<String> badVersion = api.send("PUT", p2 + "/decisions", "{\"version\":7,\"edits\":[]}");
+        assertThat(badVersion.statusCode()).isEqualTo(400);
+        ApiClient.assertSafeError(badVersion);
 
         String modulesMd = null;
         String pom = null;

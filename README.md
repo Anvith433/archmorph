@@ -181,8 +181,8 @@ Upload `/tmp/spring-layered.zip` in the UI (*New analysis*), or use the CLI / AP
 | `/projects/:id` | Overview: metrics, indicators, job progress, cycles, violations, downloads |
 | `/projects/:id/architecture` | Current layers and packages vs. proposed modular layout |
 | `/projects/:id/dependencies` | Interactive graph with type / cross-module / cycle / violation filters |
-| `/projects/:id/modules` | Module review and editor (drag and drop or keyboard "Move to"; rename, merge, split, shared, exclude, lock; undo) |
-| `/projects/:id/plan` | Transformation table, conflicts, warnings, resource findings, dry run, transform |
+| `/projects/:id/modules` | Module review and editor (drag and drop or keyboard "Move to"; rename, merge, split, shared, exclude, lock, public API / internal; undo), module cycles with suggested fixes, export/import of the review |
+| `/projects/:id/plan` | Target layout, Spring Modulith option, layout comparison, transformation table, conflicts, warnings, resource findings, dry run, transform |
 | `/projects/:id/diff` | Side-by-side diff per file |
 | `/projects/:id/validation` | Seven validation levels, build output, downloads |
 
@@ -194,6 +194,14 @@ bin/archmorph analyze   project.zip [--report-dir DIR]
 bin/archmorph plan      project.zip [--report-dir DIR]
 bin/archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
                         [--strategy modular-monolith|modular-by-domain] [--add-modulith-test]
+                        [--decisions archmorph-decisions.json]
+```
+
+A review made in the UI can be exported (Modules page → *Export decisions*) and replayed with `--decisions`,
+for example in a CI job that regenerates the transformation from the latest source:
+
+```bash
+bin/archmorph transform project.zip --output transformed.zip --decisions archmorph-decisions.json
 ```
 
 Exit codes: `0` success, `1` failure (e.g. the archive was rejected), `2` usage error,

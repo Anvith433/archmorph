@@ -108,7 +108,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if ("POST".equals(method) && (path.endsWith("/transform") || path.endsWith("/analyze") || path.endsWith("/validate"))) {
             return Category.EXPENSIVE;
         }
-        if ("PUT".equals(method) && (path.endsWith("/modules") || path.endsWith("/strategy"))) {
+        if ("PUT".equals(method) && (path.endsWith("/modules") || path.endsWith("/strategy") || path.endsWith("/decisions"))) {
             return Category.EXPENSIVE;
         }
         if ("GET".equals(method) && (path.endsWith("/download") || path.contains("/reports/"))) {

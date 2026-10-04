@@ -2,6 +2,7 @@ import type {
   Analysis,
   ArchitectureView,
   CreatedProject,
+  Decisions,
   Diff,
   DryRun,
   Envelope,
@@ -129,7 +130,11 @@ export const api = {
   architecture: (id: string) => request<ArchitectureView>(projectPath(id, '/architecture')),
   modules: (id: string) => request<Modules>(projectPath(id, '/modules')),
   updateModules: (id: string, edits: ModuleEdit[]) => request<Modules>(projectPath(id, '/modules'), json('PUT', { edits })),
+  decisions: (id: string) => request<Decisions>(projectPath(id, '/decisions')),
+  applyDecisions: (id: string, decisions: Decisions) => request<Decisions>(projectPath(id, '/decisions'), json('PUT', decisions)),
   plan: (id: string) => request<Plan>(projectPath(id, '/plan')),
+  previewPlan: (id: string, strategy: TargetStrategy) =>
+    request<Plan>(projectPath(id, `/plan?strategy=${strategy === 'MODULAR_BY_DOMAIN' ? 'MODULAR_BY_DOMAIN' : 'MODULAR_MONOLITH'}`)),
   changeStrategy: (id: string, strategy: TargetStrategy, addModulithVerification?: boolean) =>
     request<Plan>(projectPath(id, '/strategy'), json('PUT', { strategy, addModulithVerification })),
   dryRun: (id: string) => request<DryRun>(projectPath(id, '/transform?dryRun=true'), json('POST')),

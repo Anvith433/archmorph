@@ -27,6 +27,13 @@ public class ModuleDiscoveryReport {
 
     private final List<String> warnings = new ArrayList<>();
 
+    /** User decisions on module API membership, by qualified class name. */
+    private final Map<String, Exposure> exposureOverrides = new java.util.TreeMap<>();
+
+    public Map<String, Exposure> getExposureOverrides() {
+        return exposureOverrides;
+    }
+
     /** Names under which the pipeline cannot place business modules. */
     public static boolean isReservedName(String name) {
         return SHARED.equals(name) || APPLICATION.equals(name);
@@ -146,6 +153,7 @@ public class ModuleDiscoveryReport {
         }
         copy.assignments.putAll(assignments);
         copy.warnings.addAll(warnings);
+        copy.exposureOverrides.putAll(exposureOverrides);
         return copy;
     }
 

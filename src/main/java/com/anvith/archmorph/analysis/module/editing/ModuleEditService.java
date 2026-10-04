@@ -3,6 +3,7 @@ package com.anvith.archmorph.analysis.module.editing;
 import com.anvith.archmorph.analysis.dependency.DependencyGraph;
 import com.anvith.archmorph.analysis.dependency.DependencyNode;
 import com.anvith.archmorph.analysis.module.ClassAssignment;
+import com.anvith.archmorph.analysis.module.Exposure;
 import com.anvith.archmorph.analysis.module.ModuleCategory;
 import com.anvith.archmorph.analysis.module.ModuleDiscoveryReport;
 import com.anvith.archmorph.analysis.module.ModuleInfo;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Applies user decisions to a module suggestion. The suggestion itself is never modified;
@@ -45,9 +47,13 @@ public class ModuleEditService {
                 case INCLUDE_CLASS -> setExcluded(report, edit, false);
                 case LOCK_CLASS -> setLocked(report, edit, true);
                 case UNLOCK_CLASS -> setLocked(report, edit, false);
+                case EXPOSE_CLASS -> report.getExposureOverrides().put(assignment(report, edit.className()).qualifiedName(), Exposure.PUBLIC_API);
+                case INTERNAL_CLASS -> report.getExposureOverrides().put(assignment(report, edit.className()).qualifiedName(), Exposure.INTERNAL);
+                case AUTO_EXPOSURE -> report.getExposureOverrides().remove(assignment(report, edit.className()).qualifiedName());
             }
         }
         report.pruneEmptyModules();
+        requireInternalClassesUnused(report, graph);
         metricsCalculator.calculate(report, graph);
         return report;
     }
@@ -128,6 +134,31 @@ public class ModuleEditService {
     private void setLocked(ModuleDiscoveryReport report, ModuleEdit edit, boolean locked) {
         ClassAssignment assignment = assignment(report, edit.className());
         report.putAssignment(assignment.withLocked(locked));
+    }
+
+    /** A class marked internal must not be used by another module once all decisions are applied. */
+    private void requireInternalClassesUnused(ModuleDiscoveryReport report, DependencyGraph graph) {
+        for (Map.Entry<String, Exposure> override : report.getExposureOverrides().entrySet()) {
+            if (override.getValue() != Exposure.INTERNAL) {
+                continue;
+            }
+            DependencyNode node = graph.findNode(override.getKey());
+            String own = report.moduleOf(override.getKey());
+            if (node == null || own == null) {
+                continue;
+            }
+            java.util.Set<String> users = new java.util.TreeSet<>();
+            for (DependencyNode caller : graph.getPredecessors(node)) {
+                String module = report.moduleOf(caller.getId());
+                if (module != null && !module.equals(own) && !ModuleDiscoveryReport.APPLICATION.equals(module)) {
+                    users.add(caller.getClassName() + " (" + module + ")");
+                }
+            }
+            if (!users.isEmpty()) {
+                throw invalid(node.getClassName() + " cannot be internal: it is used by " + String.join(", ", users)
+                        + ". Move those classes or keep it in the module's public API.");
+            }
+        }
     }
 
     // ------------------------------------------------------------------ helpers

@@ -23,6 +23,7 @@ import com.anvith.archmorph.analysis.transformation.planner.TransformationPlan;
 import com.anvith.archmorph.analysis.transformation.planner.TransformationPlanEntry;
 import com.anvith.archmorph.analysis.transformation.target.TargetArchitecture;
 import com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver;
+import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
 import com.anvith.archmorph.analysis.validation.BuildResult;
 import com.anvith.archmorph.analysis.validation.LevelResult;
 import com.anvith.archmorph.analysis.validation.ValidationReport;
@@ -316,15 +317,24 @@ public class ApiMapper {
         ModuleDiscoveryReport finalReport = session.finalModules() == null ? suggestion : session.finalModules();
         List<String> warnings = new ArrayList<>(finalReport.getWarnings());
         var boundaries = boundaryAdvisor.advise(finalReport, session.analysis().graph(), session.analysis().facts());
-        return new ModuleDtos.ModulesDto(modules(suggestion), session.decisions().stream().map(this::edit).toList(),
-                modules(finalReport), warnings,
+        var graph = session.analysis().graph();
+        return new ModuleDtos.ModulesDto(modules(suggestion, graph), session.decisions().stream().map(this::edit).toList(),
+                modules(finalReport, graph), warnings,
                 "Module confidence, cohesion and coupling are static-analysis indicators derived from the dependency graph.",
                 boundaries.cycles(), boundaries.suggestions().stream().map(s -> new ModuleDtos.BoundarySuggestionDto(
                         s.id(), s.kind().name(), s.from(), s.to(), s.subject(), s.title(), s.rationale(), s.dependencyCount(), s.steps(),
-                        s.evidence(), s.edit() == null ? null : edit(s.edit()))).toList());
+                        s.evidence(), s.edit() == null ? null : edit(s.edit()))).toList(),
+                session.plan() == null ? null : session.plan().getStrategy().name());
     }
 
-    public List<ModuleDtos.ModuleDto> modules(ModuleDiscoveryReport report) {
+    public ModuleDtos.DecisionsDto decisions(ProjectSession session, TargetStrategy strategy, boolean modulithVerification) {
+        return new ModuleDtos.DecisionsDto(ModuleDtos.DecisionsDto.CURRENT_VERSION, strategy.name(), modulithVerification,
+                session.decisions().stream().map(ModuleDtos::fromEdit).toList());
+    }
+
+    public List<ModuleDtos.ModuleDto> modules(ModuleDiscoveryReport report, DependencyGraph graph) {
+        java.util.Set<String> exposed = com.anvith.archmorph.analysis.transformation.planner.DefaultTransformationPlanner
+                .exposedTypes(graph, report);
         List<ModuleDtos.ModuleDto> result = new ArrayList<>();
         for (ModuleInfo module : report.getModules()) {
             List<ModuleDtos.ModuleClassDto> classes = new ArrayList<>();
@@ -333,7 +343,10 @@ public class ApiMapper {
                 classes.add(new ModuleDtos.ModuleClassDto(node.getId(), node.getClassName(),
                         node.getComponentType() == null ? "UNKNOWN" : node.getComponentType().name(),
                         a == null ? 0 : round(a.confidence()), a == null ? "AUTOMATIC" : a.origin().name(),
-                        a != null && a.locked(), a != null && a.excluded(), a == null ? List.of() : a.reasons()));
+                        a != null && a.locked(), a != null && a.excluded(), a == null ? List.of() : a.reasons(),
+                        exposed.contains(node.getId()) ? "PUBLIC_API" : "INTERNAL",
+                        report.getExposureOverrides().containsKey(node.getId())
+                                ? report.getExposureOverrides().get(node.getId()).name() : null));
             }
             classes.sort(Comparator.comparing(ModuleDtos.ModuleClassDto::qualifiedName));
             result.add(new ModuleDtos.ModuleDto(module.getModuleName(), module.getCategory().name(), module.getConfidence(),
@@ -349,19 +362,11 @@ public class ApiMapper {
     }
 
     private ModuleDtos.ModuleEditDto edit(ModuleEdit edit) {
-        return new ModuleDtos.ModuleEditDto(edit.type().name(), edit.module(), edit.newName(), edit.target(),
-                edit.sources(), edit.className(), edit.classes());
+        return ModuleDtos.fromEdit(edit);
     }
 
     public ModuleEdit edit(ModuleDtos.ModuleEditDto dto) {
-        ModuleEdit.Type type;
-        try {
-            type = ModuleEdit.Type.valueOf(dto.type());
-        } catch (IllegalArgumentException e) {
-            throw new com.anvith.archmorph.common.exception.ArchMorphException(
-                    com.anvith.archmorph.common.exception.ErrorCode.INVALID_MODULE_OPERATION, "Unknown module operation.");
-        }
-        return new ModuleEdit(type, dto.module(), dto.newName(), dto.target(), dto.sources(), dto.className(), dto.classes());
+        return ModuleDtos.toEdit(dto);
     }
 
     // ================================================================== plan

@@ -1,8 +1,8 @@
 import { RotateCcw, Undo2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
-import type { ModuleEdit, Modules as ModulesData } from '../api/types';
+import { api, ApiError } from '../api/client';
+import type { Decisions, ModuleEdit, Modules as ModulesData } from '../api/types';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { CyclePanel } from '../components/CyclePanel';
 import { ModuleCard } from '../components/ModuleCard';
@@ -26,6 +26,12 @@ export function describeEdit(edit: ModuleEdit): string {
       return `Move ${short(edit.className)} → ${edit.target}`;
     case 'MOVE_TO_SHARED':
       return `Move ${short(edit.className)} → shared`;
+    case 'EXPOSE_CLASS':
+      return `Make ${short(edit.className)} public API`;
+    case 'INTERNAL_CLASS':
+      return `Make ${short(edit.className)} internal`;
+    case 'AUTO_EXPOSURE':
+      return `API visibility of ${short(edit.className)}: automatic`;
     default:
       return `${titleCase(edit.type.replace('_CLASS', ''))} ${short(edit.className)}`;
   }
@@ -119,6 +125,7 @@ export function Modules() {
               key={`${view}-${m.name}`}
               module={m}
               moduleNames={names}
+              showExposure={view === 'final' && data.strategy === 'MODULAR_MONOLITH'}
               editable={editable && view === 'final' && !saving}
               onEdit={(edit) => void submit([...data.decisions, edit])}
             />
@@ -154,6 +161,7 @@ export function Modules() {
             </ol>
           )}
           {!editable && <p className="mt-3 text-xs text-faint">Editing is disabled while a job is running or after the project failed.</p>}
+          <DecisionFile projectId={projectId} editable={editable && !saving} onApplied={() => { remote.reload(); refresh(); }} onError={setError} />
           <div className="mt-4 flex flex-wrap gap-1.5 text-[11px]">
             <Badge tone="accent">Business module</Badge>
             <Badge tone="info">Shared</Badge>
@@ -161,6 +169,61 @@ export function Modules() {
           </div>
         </Panel>
       </div>
+    </div>
+  );
+}
+
+/** Save the review (layout, Spring Modulith option, module decisions) as JSON, or load one saved earlier. */
+function DecisionFile({ projectId, editable, onApplied, onError }: {
+  projectId: string;
+  editable: boolean;
+  onApplied: () => void;
+  onError: (e: unknown) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const exportFile = async () => {
+    try {
+      const decisions = await api.decisions(projectId);
+      const blob = new Blob([JSON.stringify(decisions, null, 2) + '\n'], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'archmorph-decisions.json';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      onError(e);
+    }
+  };
+
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const parsed = JSON.parse(await file.text()) as Decisions;
+      if (!parsed || !Array.isArray(parsed.edits)) {
+        throw new ApiError('This is not an ArchMorph decisions file.', 'INVALID_REQUEST', 400,
+          'Export the decisions from the Modules page and import that file.');
+      }
+      await api.applyDecisions(projectId, parsed);
+      onApplied();
+    } catch (e) {
+      onError(e instanceof SyntaxError ? new ApiError('The file is not valid JSON.', 'INVALID_REQUEST', 400) : e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-xs">
+      <Button size="sm" variant="ghost" onClick={exportFile}>Export decisions</Button>
+      <label className={`inline-flex h-7 cursor-pointer items-center rounded-md px-2.5 font-medium text-muted hover:bg-panel-hover hover:text-fg ${!editable || busy ? 'pointer-events-none opacity-50' : ''}`}>
+        Import…
+        <input type="file" accept="application/json,.json" className="sr-only" disabled={!editable || busy}
+          onChange={(e) => { void importFile(e.target.files?.[0]); e.target.value = ''; }} />
+      </label>
+      <span className="text-faint">Replay a review here or with <code className="font-mono">--decisions</code> on the CLI.</span>
     </div>
   );
 }

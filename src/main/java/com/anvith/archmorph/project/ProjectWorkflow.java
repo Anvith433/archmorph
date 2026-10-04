@@ -155,6 +155,46 @@ public class ProjectWorkflow {
         }
     }
 
+    /**
+     * Apply a saved review in one step: target layout, Spring Modulith option and module edits. Nothing changes when
+     * any edit is invalid.
+     */
+    public ModuleDiscoveryReport applyDecisions(ProjectSession session, TargetStrategy strategy, Boolean modulithVerification,
+                                                List<ModuleEdit> edits) {
+        ReentrantLock lock = session.lock();
+        lock.lock();
+        try {
+            requireAnalysis(session);
+            editService.apply(session.analysis().suggestion(), edits, session.analysis().graph()); // validate first
+            if (strategy != null) {
+                session.setStrategy(strategy);
+            }
+            if (modulithVerification != null) {
+                session.setModulithVerification(modulithVerification);
+            }
+            return updateModules(session, edits);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Plan for another layout from the current decisions, without changing the project. */
+    public TransformationPlan previewPlan(ProjectSession session, TargetStrategy strategy) {
+        session.lock().lock();
+        try {
+            requireAnalysis(session);
+            ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+            return planner.plan(session.analysis().model(), session.analysis().graph(), modules, strategy);
+        } finally {
+            session.lock().unlock();
+        }
+    }
+
+    public boolean modulithVerificationOf(ProjectSession session) {
+        return session.modulithVerification() != null ? session.modulithVerification()
+                : properties.getTransformation().isAddModulithVerification();
+    }
+
     /** Choose the target layout and re-plan. A completed transformation is invalidated. */
     public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy) {
         return changeStrategy(session, strategy, null);

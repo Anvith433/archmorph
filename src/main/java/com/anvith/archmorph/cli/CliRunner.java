@@ -33,6 +33,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Optional;
 import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
+import com.anvith.archmorph.api.dto.ModuleDtos;
 
 /**
  * Command-line interface backed by the same {@link ProjectWorkflow} as the web API.
@@ -42,7 +43,7 @@ import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
  * archmorph plan      project.zip [--report-dir DIR]
  * archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
  *
- * options: --strategy modular-monolith (default) | modular-by-domain, --add-modulith-test
+ * options: --strategy modular-monolith (default) | modular-by-domain, --add-modulith-test, --decisions file.json
  * </pre>
  * Exit codes: 0 success, 1 failure, 2 usage error, 3 transformed but validation failed.
  */
@@ -94,12 +95,14 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         Path reportDir = null;
         TargetStrategy strategy = null;
         Boolean modulith = null;
+        Path decisions = null;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--output" -> output = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--report-dir" -> reportDir = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--no-build" -> properties.getValidation().getBuild().setEnabled(false);
                 case "--add-modulith-test" -> modulith = true;
+                case "--decisions" -> decisions = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--strategy" -> {
                     strategy = i + 1 < args.length ? parseStrategy(args[++i]) : null;
                     if (strategy == null) {
@@ -129,10 +132,24 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
             out.println("File not found: " + zip.getFileName());
             return 2;
         }
+        ModuleDtos.DecisionsDto review = null;
+        if (decisions != null) {
+            try {
+                review = tools.jackson.databind.json.JsonMapper.builder().build()
+                        .readValue(decisions.toFile(), ModuleDtos.DecisionsDto.class);
+            } catch (RuntimeException e) {
+                out.println("The decisions file could not be read: " + decisions.getFileName());
+                return 2;
+            }
+            if (review.version() != ModuleDtos.DecisionsDto.CURRENT_VERSION || review.edits() == null) {
+                out.println("Unsupported decisions file: " + decisions.getFileName());
+                return 2;
+            }
+        }
 
         ProjectWorkspace workspace = workspaceManager.create();
         try {
-            return run(command, zip, output, reportDir, strategy, modulith, workspace);
+            return run(command, zip, output, reportDir, strategy, modulith, review, workspace);
         } catch (ArchMorphException e) {
             out.println("Failed: " + e.getMessage());
             if (e.getHint() != null) {
@@ -158,7 +175,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
     }
 
     private int run(String command, Path zip, Path output, Path reportDir, TargetStrategy strategy, Boolean modulith,
-                    ProjectWorkspace workspace) throws IOException {
+                    ModuleDtos.DecisionsDto review, ProjectWorkspace workspace) throws IOException {
         Files.copy(zip, workspace.archive(), StandardCopyOption.REPLACE_EXISTING);
         ProjectSession session = new ProjectSession(workspace, FilenameSanitizer.displayName(zip.getFileName().toString()),
                 "cli", Files.size(zip));
@@ -168,6 +185,12 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
 
         out.println("Analysing " + session.displayName() + " ...");
         workflow.analyze(session, progress);
+        if (review != null) {
+            TargetStrategy reviewed = review.strategy() == null || strategy != null ? strategy : parseStrategy(review.strategy());
+            workflow.applyDecisions(session, reviewed, modulith != null ? modulith : review.addModulithVerification(),
+                    review.edits().stream().map(ModuleDtos::toEdit).toList());
+            out.println("Applied " + review.edits().size() + " review decision(s).");
+        }
         printAnalysis(session);
 
         int code = 0;
@@ -258,6 +281,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
                   --strategy modular-monolith   module root = public API, sub-packages internal (default)
                   --strategy modular-by-domain  <base>.modules.<module>.<layer>, no API separation
                   --add-modulith-test           add Spring Modulith's test dependency and a ModularityTests class
+                  --decisions <file.json>       apply review decisions exported from the UI (GET /decisions)
 
                 The original archive is never modified. See docs/API.md and README.md.""");
     }

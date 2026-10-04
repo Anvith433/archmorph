@@ -17,6 +17,9 @@ import java.util.List;
  * INCLUDE_CLASS   className
  * LOCK_CLASS      className
  * UNLOCK_CLASS    className
+ * EXPOSE_CLASS    className      (module's public API, MODULAR_MONOLITH)
+ * INTERNAL_CLASS  className      (internal sub-package; rejected while another module uses it)
+ * AUTO_EXPOSURE   className      (back to automatic: public API exactly when another module uses it)
  * </pre>
  */
 public record ModuleEdit(Type type, String module, String newName, String target, List<String> sources,
@@ -31,6 +34,9 @@ public record ModuleEdit(Type type, String module, String newName, String target
         EXCLUDE_CLASS,
         INCLUDE_CLASS,
         LOCK_CLASS,
-        UNLOCK_CLASS
+        UNLOCK_CLASS,
+        EXPOSE_CLASS,
+        INTERNAL_CLASS,
+        AUTO_EXPOSURE
     }
 }

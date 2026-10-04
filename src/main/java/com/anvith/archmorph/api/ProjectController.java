@@ -111,8 +111,25 @@ public class ProjectController {
                 service.changeStrategy(projectId, body.strategy(), body.addModulithVerification(), clients.resolve(request)));
     }
 
+    @GetMapping("/projects/{projectId}/decisions")
+    public ApiResponse<ModuleDtos.DecisionsDto> decisions(@PathVariable String projectId, HttpServletRequest request) {
+        return ApiResponse.ok("Review decisions", service.decisions(projectId, clients.resolve(request)));
+    }
+
+    @PutMapping("/projects/{projectId}/decisions")
+    public ApiResponse<ModuleDtos.DecisionsDto> applyDecisions(@PathVariable String projectId,
+                                                               @Valid @RequestBody ModuleDtos.DecisionsDto body,
+                                                               HttpServletRequest request) {
+        return ApiResponse.ok("Review decisions applied", service.applyDecisions(projectId, body, clients.resolve(request)));
+    }
+
     @GetMapping("/projects/{projectId}/plan")
-    public ApiResponse<PlanDtos.PlanDto> plan(@PathVariable String projectId, HttpServletRequest request) {
+    public ApiResponse<PlanDtos.PlanDto> plan(@PathVariable String projectId,
+                                              @RequestParam(required = false) com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy,
+                                              HttpServletRequest request) {
+        if (strategy != null) {
+            return ApiResponse.ok("Plan preview (nothing changed)", service.previewPlan(projectId, strategy, clients.resolve(request)));
+        }
         return ApiResponse.ok("Transformation plan", service.plan(projectId, clients.resolve(request)));
     }
 

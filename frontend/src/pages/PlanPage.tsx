@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { DryRun, PlanEntry, TargetStrategy } from '../api/types';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { MetricCard } from '../components/MetricCard';
+import { LayoutComparison } from '../components/LayoutComparison';
 import { primaryAction, TransformationTable } from '../components/TransformationTable';
 import { Badge, Button, Code, Panel, Skeleton } from '../components/ui';
 import { useProject } from '../hooks/ProjectContext';
@@ -30,6 +31,10 @@ export function PlanPage() {
   const [dryRun, setDryRun] = useState<DryRun>();
   const [busy, setBusy] = useState<'dry' | 'transform' | 'strategy' | null>(null);
   const [pendingStrategy, setPendingStrategy] = useState<TargetStrategy | null>(null);
+  const [compare, setCompare] = useState(false);
+  const otherStrategy: TargetStrategy = plan.data?.strategy === 'MODULAR_BY_DOMAIN' ? 'MODULAR_MONOLITH' : 'MODULAR_BY_DOMAIN';
+  const preview = useResource(() => api.previewPlan(projectId, otherStrategy),
+    compare && plan.data ? `${projectId}:${version}:${otherStrategy}` : null);
   const [error, setError] = useState<unknown>();
 
   const entries = useMemo(() => {
@@ -192,6 +197,17 @@ export function PlanPage() {
         </div>
       )}
 
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-fg">{compare ? 'Layout comparison' : 'Files'}</h2>
+        <Button size="sm" variant="ghost" aria-pressed={compare} onClick={() => setCompare((c) => !c)}>
+          {compare ? 'Back to the plan' : `Compare with ${titleCase(otherStrategy)}`}
+        </Button>
+      </div>
+      {compare && preview.error !== undefined && <ErrorPanel error={preview.error} onRetry={preview.reload} />}
+      {compare && !preview.data && preview.error === undefined && <Skeleton className="h-64" />}
+      {compare && preview.data && <LayoutComparison current={p} other={preview.data} />}
+
+      {!compare && (<>
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Filter plan entries" className="flex flex-wrap gap-1">
           {FILTERS.map((f) => (
@@ -216,6 +232,7 @@ export function PlanPage() {
         />
       </div>
       <TransformationTable entries={entries} basePackage={p.basePackage} />
+      </>)}
     </div>
   );
 }

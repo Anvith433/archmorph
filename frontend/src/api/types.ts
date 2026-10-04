@@ -210,6 +210,8 @@ export interface ModuleClass {
   locked: boolean;
   excluded: boolean;
   reasons: string[];
+  exposure: 'PUBLIC_API' | 'INTERNAL';
+  exposureOverride?: 'PUBLIC_API' | 'INTERNAL' | null;
 }
 
 export interface Module {
@@ -236,7 +238,10 @@ export type ModuleEditType =
   | 'EXCLUDE_CLASS'
   | 'INCLUDE_CLASS'
   | 'LOCK_CLASS'
-  | 'UNLOCK_CLASS';
+  | 'UNLOCK_CLASS'
+  | 'EXPOSE_CLASS'
+  | 'INTERNAL_CLASS'
+  | 'AUTO_EXPOSURE';
 
 export interface ModuleEdit {
   type: ModuleEditType;
@@ -272,6 +277,14 @@ export interface Modules {
   note: string;
   cycles: string[][];
   boundarySuggestions: BoundarySuggestion[];
+  strategy?: TargetStrategy | null;
+}
+
+export interface Decisions {
+  version: number;
+  strategy?: TargetStrategy | null;
+  addModulithVerification?: boolean | null;
+  edits: ModuleEdit[];
 }
 
 export interface PlanEntry {

@@ -144,7 +144,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
      * Classes used by code outside their own module. In a layout that separates module APIs from internals
      * they form the module's public API.
      */
-    static Set<String> exposedTypes(DependencyGraph graph, ModuleDiscoveryReport modules) {
+    public static Set<String> exposedTypes(DependencyGraph graph, ModuleDiscoveryReport modules) {
         Set<String> exposed = new TreeSet<>();
         for (var edge : graph.getEdges()) {
             String from = modules.moduleOf(edge.getSource().getId());
@@ -153,6 +153,14 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
                 exposed.add(edge.getTarget().getId());
             }
         }
+        // user decisions: internal classes are only accepted while unused by other modules (checked on edit)
+        modules.getExposureOverrides().forEach((type, exposure) -> {
+            if (exposure == com.anvith.archmorph.analysis.module.Exposure.PUBLIC_API) {
+                exposed.add(type);
+            } else {
+                exposed.remove(type);
+            }
+        });
         return exposed;
     }
 

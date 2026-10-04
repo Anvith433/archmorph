@@ -76,4 +76,30 @@ class CliRunnerTest {
         assertThat(CliRunner.isCliInvocation(new String[]{"analyze", "x.zip"})).isTrue();
         assertThat(CliRunner.isCliInvocation(new String[]{"--server.port=9000"})).isFalse();
     }
+
+    @Test
+    void savedReviewDecisionsAreReplayed() throws Exception {
+        Path zip = Files.write(temp.resolve("shop.zip"), ApiClient.zipFixture("spring-layered"));
+        Path decisions = Files.writeString(temp.resolve("decisions.json"), """
+                {"version": 1, "strategy": "MODULAR_MONOLITH", "addModulithVerification": false,
+                 "edits": [{"type": "RENAME_MODULE", "module": "user", "newName": "customer"},
+                           {"type": "EXPOSE_CLASS", "className": "com.demo.repository.UserRepository"}]}
+                """);
+        Path output = temp.resolve("out.zip");
+        ByteArrayOutputStream console = new ByteArrayOutputStream();
+        CliRunner cli = new CliRunner(workflow, workspaceManager, reports, properties, console);
+
+        int exit = cli.execute(new String[]{"transform", zip.toString(), "--output", output.toString(), "--no-build",
+                "--decisions", decisions.toString()});
+
+        String text = console.toString(StandardCharsets.UTF_8);
+        assertThat(exit).as(text).isZero();
+        assertThat(text).contains("Applied 2 review decision(s).", "customer");
+        try (ZipFile result = new ZipFile(output.toFile())) {
+            assertThat(result.getEntry("src/main/java/com/demo/customer/UserRepository.java")).isNotNull();
+        }
+
+        Path broken = Files.writeString(temp.resolve("broken.json"), "{\"version\": 99, \"edits\": []}");
+        assertThat(cli.execute(new String[]{"plan", zip.toString(), "--decisions", broken.toString()})).isEqualTo(2);
+    }
 }
