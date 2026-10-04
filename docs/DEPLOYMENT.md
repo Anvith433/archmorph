@@ -63,13 +63,15 @@ What login changes:
 * every request except `/actuator/health` needs credentials (the browser shows its login prompt);
 * a project is visible only to the user who uploaded it; other users get "not found";
 * rate limits and job quotas apply per user;
-* state-changing API requests must carry `X-Requested-With` (the UI always sends it). Browsers resend Basic
+* state-changing requests must carry `X-Requested-With` (the UI always sends it). Browsers resend Basic
   credentials automatically, so this header is what stops another site from making requests in your name;
 * after 10 failed logins for one user name from one address (or 50 for any names) within 5 minutes, further
   attempts from that address are refused for the rest of the window.
 
-Basic credentials travel with every request, so **always put TLS in front** (reverse proxy). Each request
-verifies the bcrypt hash; that costs a few milliseconds of CPU per API call, which is fine for a small team.
+Basic credentials travel with every request, so **always put TLS in front** (reverse proxy). Checking a bcrypt
+hash costs a few hundred milliseconds at the work factor `hash-password` uses, so a successful login is
+remembered for 5 minutes (in memory, keyed by an HMAC under a random per-process key; nothing reusable is
+stored and nothing survives a restart). Failed attempts are never cached and always pay the full bcrypt cost.
 There is no logout other than closing the browser, and no self-service password change: change the hash in the
 configuration and restart.
 

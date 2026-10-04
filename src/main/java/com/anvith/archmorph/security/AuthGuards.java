@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentMap;
  * <ul>
  *   <li><b>Custom-header check (CSRF).</b> Browsers resend cached Basic credentials automatically, also on
  *       requests a hostile page triggers. A cross-site form or image cannot set a custom header, and a cross-site
- *       script that tries is stopped by the CORS preflight; so state-changing API requests must carry
+ *       script that tries is stopped by the CORS preflight; so every state-changing request must carry
  *       {@code X-Requested-With}, which the UI always sends.</li>
  *   <li><b>Login throttling.</b> After {@value #MAX_FAILURES} failed logins for one user name from one client, or
  *       {@value #MAX_CLIENT_FAILURES} for any names from one client, within {@link #FAILURE_WINDOW}, further
@@ -45,7 +45,7 @@ final class AuthGuards {
     private AuthGuards() {
     }
 
-    /** Refuses state-changing API requests without {@code X-Requested-With}. */
+    /** Refuses state-changing requests without {@code X-Requested-With} (all paths, not only the API). */
     static final class RequiredHeaderFilter extends OncePerRequestFilter {
 
         private final JsonMapper json;
@@ -56,7 +56,7 @@ final class AuthGuards {
 
         @Override
         protected boolean shouldNotFilter(HttpServletRequest request) {
-            return SAFE_METHODS.contains(request.getMethod()) || !request.getRequestURI().startsWith("/api/");
+            return SAFE_METHODS.contains(request.getMethod());
         }
 
         @Override

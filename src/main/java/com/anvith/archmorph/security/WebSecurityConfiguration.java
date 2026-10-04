@@ -5,6 +5,8 @@ import com.anvith.archmorph.common.config.ArchMorphProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -50,7 +52,8 @@ public class WebSecurityConfiguration {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, ArchMorphProperties properties, ClientResolver clients,
-                                            JsonMapper json) throws Exception {
+                                            JsonMapper json, UserDetailsService users, PasswordEncoder passwords)
+            throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(properties)))
                 .csrf(csrf -> csrf.disable())
@@ -70,7 +73,10 @@ public class WebSecurityConfiguration {
         if (properties.getSecurity().getAuth().getMode() == ArchMorphProperties.AuthMode.BASIC) {
             AuthGuards.LoginThrottle throttle = new AuthGuards.LoginThrottle();
             AuthGuards.EntryPoint entryPoint = new AuthGuards.EntryPoint(throttle, clients, json);
+            DaoAuthenticationProvider bcrypt = new DaoAuthenticationProvider(users);
+            bcrypt.setPasswordEncoder(passwords);
             http
+                    .authenticationManager(new ProviderManager(new CachingAuthenticationProvider(bcrypt)))
                     .httpBasic(basic -> basic.authenticationEntryPoint(entryPoint))
                     .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
                     .addFilterBefore(new AuthGuards.LoginThrottleFilter(throttle, clients, json), BasicAuthenticationFilter.class)
