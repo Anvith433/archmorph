@@ -1,54 +1,32 @@
 package com.anvith.archmorph.analysis.cycle;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
-/**
- * Stores all circular dependencies
- * found in a project.
- */
+/** Stores all circular dependencies found in a project. */
 public class CycleReport {
 
-    /*
-     * Every detected cycle.
-     */
-    private final List<List<String>> cycles =
-            new ArrayList<>();
+    private final List<DependencyCycle> structuredCycles = new ArrayList<>();
 
-    /**
-     * Add one cycle.
-     */
-    public void addCycle(List<String> cycle) {
-
-        cycles.add(cycle);
-
+    public void addCycle(DependencyCycle cycle) {
+        structuredCycles.add(cycle);
     }
 
-    /**
-     * All cycles.
-     */
+    public List<DependencyCycle> getStructuredCycles() {
+        return Collections.unmodifiableList(structuredCycles);
+    }
+
+    /** Representative cycle paths (backwards compatible). */
     public List<List<String>> getCycles() {
-
-        return cycles;
-
+        return structuredCycles.stream().map(DependencyCycle::path).toList();
     }
 
-    /**
-     * Number of cycles.
-     */
     public int getCycleCount() {
-
-        return cycles.size();
-
+        return structuredCycles.size();
     }
 
-    /**
-     * Any cycle found?
-     */
     public boolean hasCycles() {
-
-        return !cycles.isEmpty();
-
+        return !structuredCycles.isEmpty();
     }
-
 }

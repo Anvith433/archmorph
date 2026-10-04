@@ -71,4 +71,41 @@ public static final String ALL_ARGS_CONSTRUCTOR =
 public static final String NO_ARGS_CONSTRUCTOR =
         "NoArgsConstructor";
 
+
+    /*
+     * Additional stereotypes and markers used by the classifier
+     */
+    public static final String EMBEDDABLE = "Embeddable";
+
+    public static final String MAPPED_SUPERCLASS = "MappedSuperclass";
+
+    public static final String DOCUMENT = "Document";
+
+    public static final String TABLE = "Table";
+
+    public static final String ENABLE_METHOD_SECURITY = "EnableMethodSecurity";
+
+    public static final String ENABLE_GLOBAL_METHOD_SECURITY = "EnableGlobalMethodSecurity";
+
+    public static final String BEAN = "Bean";
+
+    public static final String EXCEPTION_HANDLER = "ExceptionHandler";
+
+    public static final String REQUEST_MAPPING = "RequestMapping";
+
+    public static final String GENERATED = "Generated";
+
+    public static final java.util.Set<String> MAPPING_ANNOTATIONS = java.util.Set.of(
+            "RequestMapping", "GetMapping", "PostMapping", "PutMapping",
+            "DeleteMapping", "PatchMapping");
+
+    public static final java.util.Set<String> ENTITY_RELATIONSHIP_ANNOTATIONS = java.util.Set.of(
+            "OneToMany", "ManyToOne", "OneToOne", "ManyToMany",
+            "ElementCollection", "Embedded", "EmbeddedId", "DBRef");
+
+    public static final java.util.Set<String> PACKAGE_SCAN_ANNOTATIONS = java.util.Set.of(
+            "ComponentScan", "EntityScan", "EnableJpaRepositories",
+            "EnableMongoRepositories", "MapperScan", "ConfigurationPropertiesScan",
+            "SpringBootApplication", "EnableFeignClients");
+
 }

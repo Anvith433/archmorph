@@ -2,27 +2,27 @@ package com.anvith.archmorph.analysis.module;
 
 import com.anvith.archmorph.analysis.dependency.DependencyGraph;
 import com.anvith.archmorph.analysis.module.extractor.BusinessModuleExtractor;
-import lombok.RequiredArgsConstructor;
+import com.anvith.archmorph.parser.ClassMetadata;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
+
 @Service
-@RequiredArgsConstructor
-public class DefaultModuleDiscoveryEngine
-        implements ModuleDiscoveryEngine {
+public class DefaultModuleDiscoveryEngine implements ModuleDiscoveryEngine {
 
-    /*
-     * Graph-based module extractor.
-     */
     private final BusinessModuleExtractor businessModuleExtractor;
+    private final ModuleMetricsCalculator metricsCalculator;
 
-    @Override
-    public ModuleDiscoveryReport discover(
-            DependencyGraph dependencyGraph) {
-
-        return businessModuleExtractor.extract(
-                dependencyGraph
-        );
-
+    public DefaultModuleDiscoveryEngine(BusinessModuleExtractor businessModuleExtractor,
+                                        ModuleMetricsCalculator metricsCalculator) {
+        this.businessModuleExtractor = businessModuleExtractor;
+        this.metricsCalculator = metricsCalculator;
     }
 
+    @Override
+    public ModuleDiscoveryReport discover(DependencyGraph dependencyGraph, Map<String, ClassMetadata> facts) {
+        ModuleDiscoveryReport report = businessModuleExtractor.extract(dependencyGraph, facts);
+        metricsCalculator.calculate(report, dependencyGraph);
+        return report;
+    }
 }

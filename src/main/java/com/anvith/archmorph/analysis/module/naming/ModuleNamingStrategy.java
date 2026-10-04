@@ -6,13 +6,9 @@ import java.util.Set;
 
 public interface ModuleNamingStrategy {
 
-    /**
-     * Determine the business
-     * module name for one
-     * connected graph component.
-     */
-    String determineModuleName(
-            Set<DependencyNode> component
-    );
+    /** Determine the business module name for a group of classes. */
+    String determineModuleName(Set<DependencyNode> component);
 
+    /** Convert a domain term into a valid, non-reserved Java package segment. */
+    String toPackageSegment(String term);
 }
