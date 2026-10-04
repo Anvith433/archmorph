@@ -104,7 +104,10 @@ public class ArchMorphProperties {
         /** Move tests that mirror moved production classes, rewrite the rest. */
         private boolean preserveTests = true;
         private Duration timeout = Duration.ofSeconds(300);
-        /** Name of the package segment that holds business modules. */
+        /** Target layout. MODULAR_MONOLITH separates each module's public API from its internals. */
+        private com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy =
+                com.anvith.archmorph.analysis.transformation.target.TargetStrategy.MODULAR_MONOLITH;
+        /** Name of the package segment that holds business modules (MODULAR_BY_DOMAIN only). */
         private String modulesPackage = "modules";
         /** Name of the package segment that holds shared code. */
         private String sharedPackage = "shared";

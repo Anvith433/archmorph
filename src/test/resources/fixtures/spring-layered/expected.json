@@ -18,7 +18,7 @@
     "com.demo.common.ApiResponse": "com.demo.shared.common.ApiResponse",
     "com.demo.common.AppConstants": "com.demo.shared.common.AppConstants",
     "com.demo.config.SecurityConfig": "com.demo.shared.security.SecurityConfig",
-    "com.demo.exception.GlobalExceptionHandler": "com.demo.shared.exception.GlobalExceptionHandler"
+    "com.demo.exception.GlobalExceptionHandler": "com.demo.GlobalExceptionHandler"
   },
   "movedTests": {
     "com.demo.service.UserServiceTest": "com.demo.modules.user.service.UserServiceTest"
@@ -31,7 +31,6 @@
   "sharedClasses": [
     "com.demo.common.ApiResponse",
     "com.demo.common.AppConstants",
-    "com.demo.exception.GlobalExceptionHandler",
     "com.demo.config.SecurityConfig"
   ],
   "conflicts": [],

@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Optional;
+import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
 
 /**
  * Command-line interface backed by the same {@link ProjectWorkflow} as the web API.
@@ -40,6 +41,8 @@ import java.util.Optional;
  * archmorph analyze   project.zip [--report-dir DIR]
  * archmorph plan      project.zip [--report-dir DIR]
  * archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
+ *
+ * options: --strategy modular-monolith (default) | modular-by-domain
  * </pre>
  * Exit codes: 0 success, 1 failure, 2 usage error, 3 transformed but validation failed.
  */
@@ -89,11 +92,19 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         Path zip = null;
         Path output = null;
         Path reportDir = null;
+        TargetStrategy strategy = null;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--output" -> output = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--report-dir" -> reportDir = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--no-build" -> properties.getValidation().getBuild().setEnabled(false);
+                case "--strategy" -> {
+                    strategy = i + 1 < args.length ? parseStrategy(args[++i]) : null;
+                    if (strategy == null) {
+                        out.println("Unknown strategy. Use modular-monolith or modular-by-domain.");
+                        return 2;
+                    }
+                }
                 default -> {
                     if (args[i].startsWith("--")) {
                         out.println("Unknown option: " + args[i]);
@@ -119,7 +130,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
 
         ProjectWorkspace workspace = workspaceManager.create();
         try {
-            return run(command, zip, output, reportDir, workspace);
+            return run(command, zip, output, reportDir, strategy, workspace);
         } catch (ArchMorphException e) {
             out.println("Failed: " + e.getMessage());
             if (e.getHint() != null) {
@@ -134,10 +145,22 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         }
     }
 
-    private int run(String command, Path zip, Path output, Path reportDir, ProjectWorkspace workspace) throws IOException {
+    static TargetStrategy parseStrategy(String value) {
+        String normalised = value.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+        for (TargetStrategy strategy : TargetStrategy.values()) {
+            if (strategy.name().equals(normalised)) {
+                return strategy;
+            }
+        }
+        return null;
+    }
+
+    private int run(String command, Path zip, Path output, Path reportDir, TargetStrategy strategy,
+                    ProjectWorkspace workspace) throws IOException {
         Files.copy(zip, workspace.archive(), StandardCopyOption.REPLACE_EXISTING);
         ProjectSession session = new ProjectSession(workspace, FilenameSanitizer.displayName(zip.getFileName().toString()),
                 "cli", Files.size(zip));
+        session.setStrategy(strategy);
         ProgressListener progress = (event, detail) -> out.println("  [" + event + "] " + detail);
 
         out.println("Analysing " + session.displayName() + " ...");
@@ -182,7 +205,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
 
     private void printPlan(TransformationPlan plan) {
         out.println();
-        out.println("Plan: " + plan.movedCount() + " file(s) to move, " + plan.getConflicts().size() + " conflict(s)");
+        out.println("Plan (" + plan.getStrategy() + "): " + plan.movedCount() + " file(s) to move, " + plan.getConflicts().size() + " conflict(s)");
         for (TransformationPlanEntry e : plan.getEntries()) {
             if (e.getSafety() != SafetyLevel.SAFE || e.isMoved()) {
                 out.printf("  %-18s %s -> %s  [%s]%n", e.getSafety(), e.getSourcePackage(), e.getTargetPackage(), e.getSourceFile().getFileName());
@@ -218,6 +241,10 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
                   archmorph analyze   <project.zip> [--report-dir DIR]
                   archmorph plan      <project.zip> [--report-dir DIR]
                   archmorph transform <project.zip> --output <transformed.zip> [--report-dir DIR] [--no-build]
+
+                Options:
+                  --strategy modular-monolith   module root = public API, sub-packages internal (default)
+                  --strategy modular-by-domain  <base>.modules.<module>.<layer>, no API separation
 
                 The original archive is never modified. See docs/API.md and README.md.""");
     }

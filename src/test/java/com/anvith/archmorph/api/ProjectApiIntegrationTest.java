@@ -84,6 +84,15 @@ class ProjectApiIntegrationTest {
         assertThat(invalidEdit.statusCode()).isEqualTo(400);
         assertThat(api.json(invalidEdit).get("errorCode").asString()).isEqualTo("INVALID_MODULE_OPERATION");
 
+        // the default target is the modular monolith; this flow checks the package-by-module layout
+        assertThat(api.data(api.get(p + "/plan")).get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        HttpResponse<String> badStrategy = api.send("PUT", p + "/strategy", "{\"strategy\":\"MICROSERVICES\"}");
+        assertThat(badStrategy.statusCode()).isEqualTo(400);
+        ApiClient.assertSafeError(badStrategy);
+        HttpResponse<String> strategy = api.send("PUT", p + "/strategy", "{\"strategy\":\"MODULAR_BY_DOMAIN\"}");
+        assertThat(strategy.statusCode()).as(strategy.body()).isEqualTo(200);
+        assertThat(api.data(strategy).get("strategy").asString()).isEqualTo("MODULAR_BY_DOMAIN");
+
         JsonNode plan = api.data(api.get(p + "/plan"));
         assertThat(plan.get("classMap").get("com.demo.service.UserService").asString())
                 .isEqualTo("com.demo.modules.customer.service.UserService");
@@ -133,6 +142,7 @@ class ProjectApiIntegrationTest {
                 "src/main/java/com/demo/shared/security/SecurityConfig.java", "src/main/resources/application.properties",
                 "src/test/java/com/demo/modules/customer/service/UserServiceTest.java");
         assertThat(names).noneMatch(n -> n.startsWith("/") || n.contains(".."));
+        assertThat(names).contains("MODULES.md");
 
         for (String report : List.of("analysis.json", "modules.json", "transformation-plan.json", "validation.json",
                 "analysis.md", "transformation-summary.md", "validation-report.md")) {
@@ -201,5 +211,42 @@ class ProjectApiIntegrationTest {
         HttpResponse<String> denied = api.options("/api/v1/projects", "https://evil.example");
         assertThat(denied.statusCode()).isEqualTo(403);
         assertThat(denied.headers().firstValue("Access-Control-Allow-Origin")).isEmpty();
+    }
+
+    @Test
+    void defaultTransformationIsAModularMonolithWithDocumentedModuleApis() throws Exception {
+        JsonNode created = api.data(api.upload(ApiClient.zipFixture("spring-layered"), "shop.zip"));
+        assertThat(api.awaitJob(created.get("jobId").asString()).get("status").asString()).isEqualTo("COMPLETED");
+        String p = "/api/v1/projects/" + created.get("projectId").asString();
+
+        JsonNode plan = api.data(api.get(p + "/plan"));
+        assertThat(plan.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(plan.get("classMap").get("com.demo.service.UserService").asString()).isEqualTo("com.demo.user.UserService");
+        assertThat(plan.get("classMap").get("com.demo.controller.UserController").asString())
+                .isEqualTo("com.demo.user.controller.UserController");
+        JsonNode proposed = api.data(api.get(p + "/architecture")).get("proposed");
+        assertThat(proposed.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(proposed.get("modules").toString()).contains("(api)");
+
+        JsonNode job = api.awaitJob(api.data(api.send("POST", p + "/transform", null)).get("jobId").asString());
+        assertThat(job.get("status").asString()).as(job.toString()).isEqualTo("COMPLETED");
+        JsonNode validation = api.data(api.get(p + "/validation"));
+        for (JsonNode level : validation.get("levels")) {
+            if (level.get("level").asString().equals("ARCHITECTURE_RULES")) {
+                assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
+            }
+        }
+
+        String modulesMd = null;
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(api.getBytes(p + "/download").body()))) {
+            for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                if (entry.getName().equals("MODULES.md")) {
+                    modulesMd = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        }
+        assertThat(modulesMd).isNotNull()
+                .contains("# Modules of shop", "## user", "**Public API** (used by other modules): `User`",
+                        "ApplicationModules.of(DemoApplication.class).verify()");
     }
 }

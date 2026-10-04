@@ -275,8 +275,10 @@ export interface PlanEntry {
   classes: { source: string; target: string; nested: boolean }[];
 }
 
+export type TargetStrategy = 'MODULAR_MONOLITH' | 'MODULAR_BY_DOMAIN';
+
 export interface Plan {
-  strategy: string;
+  strategy: TargetStrategy;
   basePackage: string;
   fingerprint: string;
   summary: {

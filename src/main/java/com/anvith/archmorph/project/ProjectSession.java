@@ -44,6 +44,7 @@ public class ProjectSession {
     private ValidationReport validation;
     private boolean transformedAvailable;
     private Instant lastActivity = Instant.now();
+    private volatile com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy;
 
     public ProjectSession(ProjectWorkspace workspace, String displayName, String ownerId, long archiveBytes) {
         this.workspace = workspace;
@@ -55,6 +56,15 @@ public class ProjectSession {
 
     public ReentrantLock lock() {
         return lock;
+    }
+
+    /** Target layout chosen for this project, or null for the configured default. */
+    public com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy() {
+        return strategy;
+    }
+
+    public void setStrategy(com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy) {
+        this.strategy = strategy;
     }
 
     public void touch() {

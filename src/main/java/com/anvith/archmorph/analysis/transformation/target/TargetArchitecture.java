@@ -23,6 +23,27 @@ public interface TargetArchitecture {
      */
     TargetPlacement place(String basePackage, ClassAssignment assignment, ComponentType type, String currentPackage);
 
+    /**
+     * Target package of a class, knowing whether code outside its module uses it.
+     *
+     * @param exposed true when a class of another module (or shared / application code) depends on it
+     */
+    default TargetPlacement place(String basePackage, ClassAssignment assignment, ComponentType type, String currentPackage,
+                                  boolean exposed) {
+        return place(basePackage, assignment, type, currentPackage);
+    }
+
+    /** Root package of a business module (everything of the module lives in or below it). */
+    String moduleRoot(String basePackage, String module);
+
+    /** Root package of shared code. */
+    String sharedRoot(String basePackage);
+
+    /** True when the layout separates a module's public API (the module root package) from its internals. */
+    default boolean separatesApi() {
+        return false;
+    }
+
     /** Illustrative tree of the layout for documentation and the UI. */
     List<String> describeLayout(String basePackage, List<String> businessModules);
 }

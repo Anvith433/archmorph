@@ -11,6 +11,7 @@ import type {
   Modules,
   Plan,
   Project,
+  TargetStrategy,
   Validation,
 } from './types';
 
@@ -129,6 +130,8 @@ export const api = {
   modules: (id: string) => request<Modules>(projectPath(id, '/modules')),
   updateModules: (id: string, edits: ModuleEdit[]) => request<Modules>(projectPath(id, '/modules'), json('PUT', { edits })),
   plan: (id: string) => request<Plan>(projectPath(id, '/plan')),
+  changeStrategy: (id: string, strategy: TargetStrategy) =>
+    request<Plan>(projectPath(id, '/strategy'), json('PUT', { strategy })),
   dryRun: (id: string) => request<DryRun>(projectPath(id, '/transform?dryRun=true'), json('POST')),
   transform: (id: string) => request<CreatedProject>(projectPath(id, '/transform'), json('POST')),
   revalidate: (id: string) => request<CreatedProject>(projectPath(id, '/validate'), json('POST')),

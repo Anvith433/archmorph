@@ -201,6 +201,15 @@ public class ProjectApiService {
         return mapper.modules(session);
     }
 
+    public PlanDtos.PlanDto changeStrategy(String projectId,
+                                           com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy,
+                                           String clientId) {
+        ProjectSession session = analysed(projectId, clientId);
+        requireIdle(session);
+        workflow.changeStrategy(session, strategy);
+        return mapper.plan(session.plan(), session.finalModules());
+    }
+
     public PlanDtos.DryRunDto dryRun(String projectId, String clientId) {
         ProjectSession session = analysed(projectId, clientId);
         requireIdle(session);

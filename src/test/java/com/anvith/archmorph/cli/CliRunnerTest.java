@@ -48,10 +48,20 @@ class CliRunnerTest {
 
         String text = console.toString(StandardCharsets.UTF_8);
         assertThat(exit).as(text).isZero();
-        assertThat(text).contains("Candidate modules", "Plan:", "Validation:");
+        assertThat(text).contains("Candidate modules", "Plan (MODULAR_MONOLITH)", "Validation:");
         try (ZipFile result = new ZipFile(output.toFile())) {
+            assertThat(result.getEntry("src/main/java/com/demo/user/UserService.java")).isNotNull();
+            assertThat(result.getEntry("src/main/java/com/demo/user/controller/UserController.java")).isNotNull();
+            assertThat(result.getEntry("MODULES.md")).isNotNull();
+        }
+
+        Path byDomain = temp.resolve("by-domain.zip");
+        assertThat(cli.execute(new String[]{"transform", zip.toString(), "--output", byDomain.toString(),
+                "--strategy", "modular-by-domain", "--no-build"})).isZero();
+        try (ZipFile result = new ZipFile(byDomain.toFile())) {
             assertThat(result.getEntry("src/main/java/com/demo/modules/user/service/UserService.java")).isNotNull();
         }
+        assertThat(cli.execute(new String[]{"plan", zip.toString(), "--strategy", "microservices"})).isEqualTo(2);
         assertThat(temp.resolve("reports/transformation-plan.json")).exists();
         assertThat(temp.resolve("reports/validation-report.md")).exists();
         assertThat(zip).as("input archive untouched").exists();

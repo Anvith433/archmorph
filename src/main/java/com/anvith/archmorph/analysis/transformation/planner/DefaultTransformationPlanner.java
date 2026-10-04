@@ -97,7 +97,8 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         String basePackage = basePackageResolver.resolve(productionPackages);
         plan.setBasePackage(basePackage);
 
-        TransformationMappingReport mappings = mappingEngine.build(moduleReport, basePackage, strategy);
+        TransformationMappingReport mappings = mappingEngine.build(moduleReport, basePackage, strategy,
+                exposedTypes(graph, moduleReport));
         Map<String, ClassMetadata> typeByName = new HashMap<>();
         model.allTypes().forEach(t -> typeByName.put(t.getQualifiedName(), t));
 
@@ -139,6 +140,22 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         return plan;
     }
 
+    /**
+     * Classes used by code outside their own module. In a layout that separates module APIs from internals
+     * they form the module's public API.
+     */
+    static Set<String> exposedTypes(DependencyGraph graph, ModuleDiscoveryReport modules) {
+        Set<String> exposed = new TreeSet<>();
+        for (var edge : graph.getEdges()) {
+            String from = modules.moduleOf(edge.getSource().getId());
+            String to = modules.moduleOf(edge.getTarget().getId());
+            if (from != null && to != null && !from.equals(to)) {
+                exposed.add(edge.getTarget().getId());
+            }
+        }
+        return exposed;
+    }
+
     // ================================================================== entries
 
     private TransformationPlanEntry createMainEntry(SourceFile file, TransformationMappingReport mappings,
@@ -177,7 +194,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
             entry.getActions().add(TransformationAction.EXCLUDE);
             return entry;
         }
-        if (assignment.category() == ModuleCategory.APPLICATION) {
+        if (assignment.category() == ModuleCategory.APPLICATION && primary.getComponentType() == ComponentType.APPLICATION) {
             keep(entry, SafetyLevel.SAFE, "application entry point stays at the component-scan root");
             return entry;
         }

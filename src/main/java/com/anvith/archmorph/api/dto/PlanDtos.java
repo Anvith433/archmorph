@@ -39,6 +39,11 @@ public final class PlanDtos {
                                 int linesAdded, int linesRemoved, List<String> warnings) {
     }
 
+    /** Body of {@code PUT /projects/{id}/strategy}. */
+    public record ChangeStrategyRequest(@jakarta.validation.constraints.NotNull
+                                        com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy) {
+    }
+
     public record DryRunDto(PlanDto plan, List<FileChangeDto> files, List<String> warnings, long durationMillis) {
     }
 

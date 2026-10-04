@@ -103,6 +103,14 @@ public class ProjectController {
                 service.updateModules(projectId, body, clients.resolve(request)));
     }
 
+    @PutMapping("/projects/{projectId}/strategy")
+    public ApiResponse<PlanDtos.PlanDto> changeStrategy(@PathVariable String projectId,
+                                                        @Valid @RequestBody PlanDtos.ChangeStrategyRequest body,
+                                                        HttpServletRequest request) {
+        return ApiResponse.ok("Target architecture changed; plan rebuilt",
+                service.changeStrategy(projectId, body.strategy(), clients.resolve(request)));
+    }
+
     @GetMapping("/projects/{projectId}/plan")
     public ApiResponse<PlanDtos.PlanDto> plan(@PathVariable String projectId, HttpServletRequest request) {
         return ApiResponse.ok("Transformation plan", service.plan(projectId, clients.resolve(request)));

@@ -31,7 +31,8 @@ public class DefaultTransformationMappingEngine implements TransformationMapping
     }
 
     @Override
-    public TransformationMappingReport build(ModuleDiscoveryReport report, String basePackage, TargetStrategy strategy) {
+    public TransformationMappingReport build(ModuleDiscoveryReport report, String basePackage, TargetStrategy strategy,
+                                             Set<String> exposedTypes) {
         TargetArchitecture architecture = architectureResolver.resolve(strategy);
         TransformationMappingReport mappingReport = new TransformationMappingReport();
 
@@ -48,7 +49,8 @@ public class DefaultTransformationMappingEngine implements TransformationMapping
                 continue;
             }
             String sourcePackage = node.getPackageName() == null ? "" : node.getPackageName();
-            TargetPlacement placement = architecture.place(base, assignment, node.getComponentType(), sourcePackage);
+            TargetPlacement placement = architecture.place(base, assignment, node.getComponentType(), sourcePackage,
+                    exposedTypes.contains(node.getId()));
 
             TransformationMapping mapping = new TransformationMapping();
             mapping.setNode(node);

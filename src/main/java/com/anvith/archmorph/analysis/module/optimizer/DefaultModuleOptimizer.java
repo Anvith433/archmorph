@@ -71,6 +71,7 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
         promoteSharedSupertypes(report, graph);
         mergeFragments(report, graph);
         promoteShared(report, graph, config);
+        moveCompositionRoots(report, graph);
         enforceSingleOwnership(report);
         report.pruneEmptyModules();
         metricsCalculator.calculate(report, graph);
@@ -293,6 +294,50 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
                 }
             }
         }
+    }
+
+    /**
+     * Shared code that depends on business modules but is used by none of them is application wiring — a
+     * global {@code @RestControllerAdvice} handling module exceptions, a security configuration that uses a
+     * module's {@code UserDetailsService}. In shared it would create a shared ↔ module cycle; at the
+     * application root (which belongs to no module) it can see every module without one. Shared code that
+     * modules also use is left in shared and reported, because that cycle needs a design decision.
+     */
+    private void moveCompositionRoots(ModuleDiscoveryReport report, DependencyGraph graph) {
+        ModuleInfo shared = report.getModule(ModuleDiscoveryReport.SHARED);
+        if (shared == null) {
+            return;
+        }
+        for (DependencyNode node : new ArrayList<>(shared.getClasses())) {
+            ClassAssignment assignment = report.getAssignment(node.getId());
+            if (assignment != null && assignment.locked()) {
+                continue;
+            }
+            Set<String> uses = new java.util.TreeSet<>();
+            for (DependencyNode target : graph.getSuccessors(node)) {
+                ModuleInfo module = report.getModule(report.moduleOf(target.getId()) == null ? "" : report.moduleOf(target.getId()));
+                if (module != null && module.isBusinessModule()) {
+                    uses.add(module.getModuleName());
+                }
+            }
+            if (uses.isEmpty()) {
+                continue;
+            }
+            boolean usedByModules = graph.getPredecessors(node).stream().anyMatch(caller -> {
+                ModuleInfo module = report.getModule(report.moduleOf(caller.getId()) == null ? "" : report.moduleOf(caller.getId()));
+                return module != null && (module.isBusinessModule() || module.getCategory() == ModuleCategory.SHARED);
+            });
+            if (usedByModules) {
+                report.getWarnings().add("Shared class " + node.getClassName() + " depends on modules " + uses
+                        + " and is used by other code; this is a dependency cycle to resolve by design (an interface or event in shared).");
+                continue;
+            }
+            report.assign(node, ModuleDiscoveryReport.APPLICATION, ModuleCategory.APPLICATION, 0.8,
+                    ClassAssignment.Origin.AUTOMATIC,
+                    List.of("application wiring: depends on modules " + uses + " and no module depends on it; "
+                            + "placed at the application root to avoid a shared ↔ module cycle"));
+        }
+        report.pruneEmptyModules();
     }
 
     /** Invariant check: a class must be in exactly one module. Repairs duplicates deterministically. */

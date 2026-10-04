@@ -2,7 +2,7 @@ import { FlaskConical, Play } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import type { DryRun, PlanEntry } from '../api/types';
+import type { DryRun, PlanEntry, TargetStrategy } from '../api/types';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { MetricCard } from '../components/MetricCard';
 import { primaryAction, TransformationTable } from '../components/TransformationTable';
@@ -22,13 +22,14 @@ function matches(entry: PlanEntry, filter: Filter): boolean {
 }
 
 export function PlanPage() {
-  const { projectId, version, project, trackJob } = useProject();
+  const { projectId, version, project, trackJob, refresh } = useProject();
   const plan = useResource(() => api.plan(projectId), `${projectId}:${version}`);
   const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('ALL');
   const [query, setQuery] = useState('');
   const [dryRun, setDryRun] = useState<DryRun>();
-  const [busy, setBusy] = useState<'dry' | 'transform' | null>(null);
+  const [busy, setBusy] = useState<'dry' | 'transform' | 'strategy' | null>(null);
+  const [pendingStrategy, setPendingStrategy] = useState<TargetStrategy | null>(null);
   const [error, setError] = useState<unknown>();
 
   const entries = useMemo(() => {
@@ -45,6 +46,22 @@ export function PlanPage() {
       setError(e);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const chooseStrategy = async (strategy: TargetStrategy) => {
+    setPendingStrategy(strategy);
+    setBusy('strategy');
+    setError(undefined);
+    setDryRun(undefined);
+    try {
+      await api.changeStrategy(projectId, strategy);
+      refresh();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+      setPendingStrategy(null);
     }
   };
 
@@ -87,6 +104,9 @@ export function PlanPage() {
       </div>
 
       {error !== undefined && <ErrorPanel error={error} />}
+
+      <StrategyPicker value={pendingStrategy ?? p.strategy} disabled={busy !== null || !canTransform} onChange={chooseStrategy} />
+
       {project?.capabilities.manualReviewRequired && (
         <div role="note" className="rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-fg">
           <strong>Manual review required.</strong> Some files stay where they are because moving them automatically is not safe. The rest of the
@@ -178,5 +198,47 @@ export function PlanPage() {
       </div>
       <TransformationTable entries={entries} basePackage={p.basePackage} />
     </div>
+  );
+}
+
+const STRATEGIES: { value: TargetStrategy; title: string; description: string; example: string }[] = [
+  {
+    value: 'MODULAR_MONOLITH',
+    title: 'Modular monolith',
+    description:
+      'Each module gets a public API (its root package: the types other modules use) and internal sub-packages. Follows Spring Modulith conventions, so the boundaries can be verified.',
+    example: 'com.app.order.OrderService · com.app.order.repository.OrderRepository',
+  },
+  {
+    value: 'MODULAR_BY_DOMAIN',
+    title: 'Package by module',
+    description: 'Groups code by module with layer folders inside, without separating a public API from internals.',
+    example: 'com.app.modules.order.service.OrderService',
+  },
+];
+
+function StrategyPicker({ value, disabled, onChange }: { value: TargetStrategy; disabled: boolean; onChange: (s: TargetStrategy) => void }) {
+  return (
+    <fieldset className="grid grid-cols-1 gap-3 md:grid-cols-2" disabled={disabled}>
+      <legend className="mb-2 text-sm font-medium text-fg">Target architecture</legend>
+      {STRATEGIES.map((s) => (
+        <label
+          key={s.value}
+          className={cn(
+            'flex cursor-pointer gap-3 rounded-lg border p-3 text-sm',
+            value === s.value ? 'border-accent bg-accent-soft' : 'border-line bg-panel hover:bg-panel-hover',
+            disabled && 'cursor-not-allowed opacity-60',
+          )}
+        >
+          <input type="radio" name="strategy" className="mt-1" checked={value === s.value} onChange={() => onChange(s.value)} />
+          <span className="min-w-0">
+            <span className="font-medium text-fg">{s.title}</span>
+            {s.value === 'MODULAR_MONOLITH' && <Badge tone="accent" className="ml-2">default</Badge>}
+            <span className="mt-1 block text-xs text-muted">{s.description}</span>
+            <span className="mt-1 block truncate font-mono text-[11px] text-faint">{s.example}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }

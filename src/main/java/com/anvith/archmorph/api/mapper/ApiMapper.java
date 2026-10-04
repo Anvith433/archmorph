@@ -255,6 +255,9 @@ public class ApiMapper {
             layers.add(new ArchitectureDtos.LayerDto(type.name().toLowerCase(), type.name(), names.size(), names));
         });
 
+        TargetArchitecture target = plan == null ? architectureResolver.defaultArchitecture()
+                : architectureResolver.resolve(plan.getStrategy());
+        String base = plan == null ? "" : plan.getBasePackage();
         List<ArchitectureDtos.ProposedModuleDto> proposedModules = new ArrayList<>();
         Map<String, List<String>> shared = new TreeMap<>();
         List<String> application = new ArrayList<>();
@@ -265,6 +268,17 @@ public class ApiMapper {
                 var entry = plan == null ? null : plan.getEntries().stream()
                         .filter(e -> e.getNode() != null && e.getNode().getId().equals(node.getId())).findFirst().orElse(null);
                 String folder = entry != null && entry.getFolder() != null ? entry.getFolder().getFolderName() : "common";
+                if (target.separatesApi() && entry != null && entry.getTargetPackage() != null) {
+                    // show where the class really goes: the module API (root package) or an internal sub-package
+                    String root = module.getCategory() == ModuleCategory.BUSINESS_MODULE
+                            ? target.moduleRoot(base, module.getModuleName()) : target.sharedRoot(base);
+                    String pkg = entry.getTargetPackage();
+                    if (pkg.equals(root)) {
+                        folder = "(api)";
+                    } else if (pkg.startsWith(root + ".")) {
+                        folder = pkg.substring(root.length() + 1);
+                    }
+                }
                 if (module.getCategory() == ModuleCategory.BUSINESS_MODULE) {
                     folders.computeIfAbsent(folder, k -> new ArrayList<>()).add(node.getClassName());
                 } else if (module.getCategory() == ModuleCategory.APPLICATION) {
@@ -284,12 +298,10 @@ public class ApiMapper {
         }
         shared.values().forEach(l -> l.sort(String::compareTo));
 
-        TargetArchitecture target = architectureResolver.defaultArchitecture();
-        String base = plan == null ? "" : plan.getBasePackage();
         List<String> layout = target.describeLayout(base, proposedModules.stream().map(ArchitectureDtos.ProposedModuleDto::name).toList());
         return new ArchitectureDtos.ArchitectureDto(
                 new ArchitectureDtos.CurrentDto(analysis.architecture().getPackageStyle().name(), layers, packages),
-                new ArchitectureDtos.ProposedDto(plan == null ? "MODULAR_BY_DOMAIN" : plan.getStrategy().name(), base, layout,
+                new ArchitectureDtos.ProposedDto(target.strategy().name(), base, layout,
                         proposedModules, shared, application),
                 List.of("The application entry point stays at the component-scan root; moving it would stop Spring from scanning the modules."));
     }

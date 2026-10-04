@@ -45,7 +45,9 @@ public class ModularByDomainArchitecture implements TargetArchitecture {
     public TargetPlacement place(String basePackage, ClassAssignment assignment, ComponentType type, String currentPackage) {
         ModuleCategory category = assignment.category();
         if (category == ModuleCategory.APPLICATION) {
-            return new TargetPlacement(currentPackage, FolderType.COMMON);
+            // the entry point stays where it is (it defines the component-scan root); other application
+            // wiring goes directly into the root package, which belongs to no module
+            return new TargetPlacement(type == ComponentType.APPLICATION ? currentPackage : basePackage, FolderType.COMMON);
         }
         FolderType folder = folderClassifier.classify(type);
         if (category == ModuleCategory.BUSINESS_MODULE) {
@@ -68,6 +70,16 @@ public class ModularByDomainArchitecture implements TargetArchitecture {
     }
 
     @Override
+    public String moduleRoot(String basePackage, String module) {
+        return join(basePackage, properties.getTransformation().getModulesPackage(), module);
+    }
+
+    @Override
+    public String sharedRoot(String basePackage) {
+        return join(basePackage, properties.getTransformation().getSharedPackage());
+    }
+
+    @Override
     public List<String> describeLayout(String basePackage, List<String> businessModules) {
         List<String> lines = new ArrayList<>();
         String modules = properties.getTransformation().getModulesPackage();
@@ -80,7 +92,7 @@ public class ModularByDomainArchitecture implements TargetArchitecture {
         return lines;
     }
 
-    private static String join(String... parts) {
+    static String join(String... parts) {
         StringBuilder builder = new StringBuilder();
         for (String part : parts) {
             if (part == null || part.isEmpty()) {

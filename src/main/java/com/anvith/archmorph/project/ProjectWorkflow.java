@@ -32,6 +32,7 @@ import com.anvith.archmorph.upload.service.ZipExtractionService;
 import com.anvith.archmorph.workspace.WorkspaceManager;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
@@ -46,7 +47,6 @@ import java.util.concurrent.locks.ReentrantLock;
 @Service
 public class ProjectWorkflow {
 
-    private static final TargetStrategy STRATEGY = TargetStrategy.MODULAR_BY_DOMAIN;
     private static final int MAX_DIFF_CHARS = 400_000;
 
     private final ZipExtractionService extractor;
@@ -58,11 +58,15 @@ public class ProjectWorkflow {
     private final ReportService reports;
     private final SourceRewriter rewriter;
     private final DiffService diffService;
+    private final com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures;
+    private final com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation;
     private final ArchMorphProperties properties;
 
     public ProjectWorkflow(ZipExtractionService extractor, ProjectAnalyzer analyzer, ModuleEditService editService,
                            TransformationPlanner planner, TransformationEngine engine, ValidationEngine validationEngine,
                            ReportService reports, SourceRewriter rewriter, DiffService diffService,
+                           com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures,
+                           com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation,
                            ArchMorphProperties properties) {
         this.extractor = extractor;
         this.analyzer = analyzer;
@@ -73,6 +77,8 @@ public class ProjectWorkflow {
         this.reports = reports;
         this.rewriter = rewriter;
         this.diffService = diffService;
+        this.architectures = architectures;
+        this.moduleDocumentation = moduleDocumentation;
         this.properties = properties;
     }
 
@@ -133,13 +139,56 @@ public class ProjectWorkflow {
             session.setDecisions(edits);
             session.setFinalModules(result);
             invalidateTransformation(session);
-            session.setPlan(planner.plan(session.analysis().model(), session.analysis().graph(), result, STRATEGY));
+            session.setPlan(planner.plan(session.analysis().model(), session.analysis().graph(), result, strategyOf(session)));
             reports.writePlan(session);
             session.setStatus(ProjectStatus.READY_FOR_REVIEW);
             return result;
         } finally {
             lock.unlock();
         }
+    }
+
+    /** Choose the target layout and re-plan. A completed transformation is invalidated. */
+    public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy) {
+        ReentrantLock lock = session.lock();
+        lock.lock();
+        try {
+            requireAnalysis(session);
+            session.setStrategy(strategy);
+            invalidateTransformation(session);
+            ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+            TransformationPlan plan = planner.plan(session.analysis().model(), session.analysis().graph(), modules, strategy);
+            session.setPlan(plan);
+            reports.writePlan(session);
+            session.setStatus(ProjectStatus.READY_FOR_REVIEW);
+            return plan;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** MODULES.md in the transformed project; never overwrites a file the project already has. */
+    private void writeModuleDocumentation(ProjectSession session) {
+        Path root = session.workspace().transformed();
+        Path target = root.resolve(com.anvith.archmorph.report.ModuleDocumentation.FILE_NAME);
+        if (Files.exists(target)) {
+            target = root.resolve(com.anvith.archmorph.report.ModuleDocumentation.FALLBACK_FILE_NAME);
+            if (Files.exists(target)) {
+                return;
+            }
+        }
+        ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+        String markdown = moduleDocumentation.render(session.displayName(), session.plan(), modules, session.analysis().graph(),
+                architectures.resolve(session.plan().getStrategy()));
+        try {
+            Files.writeString(target, markdown, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new com.anvith.archmorph.common.exception.WorkspaceCreationException("Unable to write the module documentation.", e);
+        }
+    }
+
+    public TargetStrategy strategyOf(ProjectSession session) {
+        return session.strategy() != null ? session.strategy() : properties.getTransformation().getStrategy();
     }
 
     // ================================================================== dry run & diff
@@ -217,6 +266,7 @@ public class ProjectWorkflow {
 
             progress.onEvent(ProgressEvent.TRANSFORMATION_STARTED, "Generating the modular project");
             TransformationResult result = engine.execute(session.analysis().model(), session.plan(), session.workspace().transformed());
+            writeModuleDocumentation(session);
             deadline.check();
             session.lock().lock();
             try {
@@ -278,7 +328,7 @@ public class ProjectWorkflow {
         AnalysisResult analysis = session.analysis();
         ModuleDiscoveryReport modules = editService.apply(analysis.suggestion(), session.decisions(), analysis.graph());
         session.setFinalModules(modules);
-        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), modules, STRATEGY);
+        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), modules, strategyOf(session));
         session.setPlan(plan);
         progress.onEvent(ProgressEvent.PLAN_CREATED, plan.getEntries().size() + " files planned, " + plan.movedCount() + " to move");
     }

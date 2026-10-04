@@ -14,7 +14,12 @@ import com.anvith.archmorph.support.PipelineRunner;
 import com.github.javaparser.ast.ImportDeclaration;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import com.anvith.archmorph.analysis.validation.LevelResult;
+import com.anvith.archmorph.analysis.validation.ValidationIssue;
+import com.anvith.archmorph.analysis.validation.ValidationLevel;
+import com.anvith.archmorph.support.InMemoryCompiler;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
@@ -52,14 +57,20 @@ class TransformationInvariantsTest {
     @TempDir
     Path temp;
 
-    static List<String> fixtures() {
-        return Fixtures.names();
+    static List<Arguments> fixtures() {
+        List<Arguments> arguments = new java.util.ArrayList<>();
+        for (String fixture : Fixtures.names()) {
+            for (TargetStrategy strategy : TargetStrategy.values()) {
+                arguments.add(Arguments.of(fixture, strategy));
+            }
+        }
+        return arguments;
     }
 
-    @ParameterizedTest(name = "{0}")
+    @ParameterizedTest(name = "{0} / {1}")
     @MethodSource("fixtures")
-    void invariantsHold(String fixture) throws Exception {
-        PipelineRunner.Run run = runner.run(fixture, temp.resolve("a"));
+    void invariantsHold(String fixture, TargetStrategy strategy) throws Exception {
+        PipelineRunner.Run run = runner.run(fixture, temp.resolve("a"), strategy);
         TransformationPlan plan = run.plan();
 
         // 1. No source file disappears: every Java file has exactly one entry and its target exists.
@@ -112,12 +123,23 @@ class TransformationInvariantsTest {
         assertThat(hash(run.original(), false)).isEqualTo(before);
 
         // 7. Determinism: same inputs give the same plan and byte-identical output.
-        PipelineRunner.Run second = runner.run(fixture, temp.resolve("b"));
+        PipelineRunner.Run second = runner.run(fixture, temp.resolve("b"), strategy);
         assertThat(second.plan().fingerprint()).isEqualTo(plan.fingerprint());
         assertThat(hash(second.transformed(), false)).isEqualTo(hash(run.transformed(), false));
         TransformationPlan replanned = planner.plan(run.analysis().model(), run.analysis().graph(), run.analysis().suggestion(),
-                TargetStrategy.MODULAR_BY_DOMAIN);
+                strategy);
         assertThat(replanned.fingerprint()).isEqualTo(plan.fingerprint());
+
+        // 8. Module boundaries: no class of one module uses an internal class of another (MODULAR_MONOLITH).
+        LevelResult architecture = run.validation().levels().stream()
+                .filter(l -> l.level() == ValidationLevel.ARCHITECTURE_RULES).findFirst().orElseThrow();
+        assertThat(architecture.issues()).as("architecture errors " + architecture.issues())
+                .noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR);
+
+        // 9. Known-good fixtures compile in every layout.
+        if (Files.readString(Fixtures.path(fixture).resolve("expected.json")).contains("\"compiles\": true")) {
+            assertThat(InMemoryCompiler.compile(run.transformed(), temp.resolve("classes"))).as("compile errors").isEmpty();
+        }
     }
 
     private static String hash(Path root, boolean skipExpectations) throws IOException {
