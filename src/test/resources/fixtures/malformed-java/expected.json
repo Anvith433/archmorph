@@ -1,0 +1,20 @@
+{
+  "description": "One file has a syntax error: it is reported, kept and copied unchanged; everything else is transformed.",
+  "modules": [
+    "user"
+  ],
+  "moved": {
+    "com.demo.service.UserService": "com.demo.modules.user.service.UserService",
+    "com.demo.entity.User": "com.demo.modules.user.entity.User"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReviewFiles": [
+    "src/main/java/com/demo/service/Broken.java"
+  ],
+  "conflicts": [],
+  "parseErrors": 1,
+  "minCycles": 0,
+  "compiles": false
+}

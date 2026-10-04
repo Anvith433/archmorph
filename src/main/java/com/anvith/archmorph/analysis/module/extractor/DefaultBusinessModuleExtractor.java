@@ -45,6 +45,8 @@ import java.util.TreeSet;
 @Service
 public class DefaultBusinessModuleExtractor implements BusinessModuleExtractor {
 
+    private static final Set<String> SECURITY_SEGMENTS = Set.of("security", "auth", "jwt", "oauth");
+
     private static final Set<String> INFRA_SEGMENTS = Set.of(
             "infrastructure", "infra", "client", "clients", "adapter", "adapters", "integration", "messaging",
             "storage", "cache", "gateway", "gateways", "external");
@@ -137,8 +139,38 @@ public class DefaultBusinessModuleExtractor implements BusinessModuleExtractor {
             report.getWarnings().add(node.getClassName() + " could not be tied to a business module and was placed in shared.");
         }
 
+        keepFilesTogether(nodes, report);
         report.pruneEmptyModules();
         return report;
+    }
+
+    /** Files move as a whole: secondary top-level types join the module of the file's primary type. */
+    private void keepFilesTogether(List<DependencyNode> nodes, ModuleDiscoveryReport report) {
+        Map<String, List<DependencyNode>> byFile = new TreeMap<>();
+        for (DependencyNode node : nodes) {
+            if (node.getRelativePath() != null) {
+                byFile.computeIfAbsent(node.getRelativePath(), k -> new ArrayList<>()).add(node);
+            }
+        }
+        for (Map.Entry<String, List<DependencyNode>> file : byFile.entrySet()) {
+            if (file.getValue().size() < 2) {
+                continue;
+            }
+            String fileName = file.getKey().substring(file.getKey().lastIndexOf('/') + 1).replace(".java", "");
+            DependencyNode primary = file.getValue().stream().filter(n -> n.getClassName().equals(fileName))
+                    .findFirst().orElse(file.getValue().getFirst());
+            ClassAssignment owner = report.getAssignment(primary.getId());
+            if (owner == null) {
+                continue;
+            }
+            for (DependencyNode secondary : file.getValue()) {
+                if (secondary != primary) {
+                    report.assign(secondary, owner.moduleName(), owner.category(), owner.confidence(),
+                            ClassAssignment.Origin.AUTOMATIC,
+                            List.of("declared in the same file as " + primary.getClassName() + "; files move as a whole"));
+                }
+            }
+        }
     }
 
     private boolean placeAmbiguous(DependencyNode node, DependencyGraph graph, ModuleAffinityModel model,
@@ -217,8 +249,27 @@ public class DefaultBusinessModuleExtractor implements BusinessModuleExtractor {
             case CONFIGURATION -> new Fixed(ModuleCategory.CONFIGURATION, "framework configuration class");
             case SECURITY, FILTER -> new Fixed(ModuleCategory.SECURITY, "security / request-filter class");
             case EXCEPTION_HANDLER -> new Fixed(ModuleCategory.SHARED, "global exception handler");
-            default -> null;
+            default -> byPackageConvention(node, type);
         };
+    }
+
+    /** Package convention: classes under security/auth/jwt or infrastructure packages are not domain code. */
+    private Fixed byPackageConvention(DependencyNode node, ComponentType type) {
+        if (type == ComponentType.ENTITY || type == ComponentType.CONTROLLER || type == ComponentType.REPOSITORY
+                || type == ComponentType.DTO || type == ComponentType.EXCEPTION) {
+            return null;
+        }
+        String pkg = node.getPackageName() == null ? "" : node.getPackageName().toLowerCase(Locale.ROOT);
+        for (String segment : pkg.split("\\.")) {
+            if (SECURITY_SEGMENTS.contains(segment)) {
+                return new Fixed(ModuleCategory.SECURITY, "located in the '" + segment + "' package");
+            }
+        }
+        if (infrastructure(node) && (type == ComponentType.COMPONENT || type == ComponentType.UNKNOWN
+                || type == ComponentType.SERVICE)) {
+            return new Fixed(ModuleCategory.INFRASTRUCTURE, "located in an infrastructure package");
+        }
+        return null;
     }
 
     private boolean infrastructure(DependencyNode node) {

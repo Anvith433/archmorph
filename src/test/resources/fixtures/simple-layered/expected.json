@@ -1,0 +1,24 @@
+{
+  "description": "Plain Java layered project without framework annotations: classification relies on names and packages.",
+  "modules": [
+    "order",
+    "user"
+  ],
+  "moved": {
+    "com.demo.service.UserService": "com.demo.modules.user.service.UserService",
+    "com.demo.entity.Order": "com.demo.modules.order.entity.Order",
+    "com.demo.controller.OrderController": "com.demo.modules.order.controller.OrderController"
+  },
+  "movedTests": {
+    "com.demo.service.UserServiceTest": "com.demo.modules.user.service.UserServiceTest"
+  },
+  "kept": [
+    "com.demo.Main"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

@@ -377,37 +377,33 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
     }
 
     private boolean resolveCollisions(List<TransformationPlanEntry> entries, TransformationPlan plan) {
-        boolean changed = false;
-
         Map<String, List<TransformationPlanEntry>> byPath = new TreeMap<>();
+        Map<String, Set<TransformationPlanEntry>> byClass = new TreeMap<>();
         for (TransformationPlanEntry entry : entries) {
             byPath.computeIfAbsent(entry.getTargetFile().toString().replace('\\', '/'), k -> new ArrayList<>()).add(entry);
+            for (ClassMove move : entry.getClasses()) {
+                byClass.computeIfAbsent(move.targetQualifiedName(), k -> new LinkedHashSet<>()).add(entry);
+            }
         }
+
+        // Detect everything first, then demote, so every kind of collision is reported.
+        Map<TransformationPlanEntry, String> demotions = new LinkedHashMap<>();
         for (Map.Entry<String, List<TransformationPlanEntry>> group : byPath.entrySet()) {
             if (group.getValue().size() > 1 && group.getValue().stream().anyMatch(TransformationPlanEntry::isMoved)) {
                 recordConflict(plan, PlanConflict.Type.TARGET_PATH_COLLISION, group.getKey(), group.getValue());
                 group.getValue().stream().filter(TransformationPlanEntry::isMoved).forEach(e ->
-                        demote(e, SafetyLevel.MANUAL_REVIEW, "target path collides with another file (" + group.getKey() + ")"));
-                changed = true;
+                        demotions.putIfAbsent(e, "target path collides with another file (" + group.getKey() + ")"));
             }
         }
-
-        Map<String, List<TransformationPlanEntry>> byClass = new TreeMap<>();
-        for (TransformationPlanEntry entry : entries) {
-            for (ClassMove move : entry.getClasses()) {
-                byClass.computeIfAbsent(move.targetQualifiedName(), k -> new ArrayList<>()).add(entry);
+        for (Map.Entry<String, Set<TransformationPlanEntry>> group : byClass.entrySet()) {
+            if (group.getValue().size() > 1 && group.getValue().stream().anyMatch(TransformationPlanEntry::isMoved)) {
+                recordConflict(plan, PlanConflict.Type.TARGET_CLASS_NAME_COLLISION, group.getKey(), List.copyOf(group.getValue()));
+                group.getValue().stream().filter(TransformationPlanEntry::isMoved).forEach(e ->
+                        demotions.putIfAbsent(e, "target class name " + group.getKey() + " collides with another class"));
             }
         }
-        for (Map.Entry<String, List<TransformationPlanEntry>> group : byClass.entrySet()) {
-            Set<TransformationPlanEntry> distinct = new LinkedHashSet<>(group.getValue());
-            if (distinct.size() > 1 && distinct.stream().anyMatch(TransformationPlanEntry::isMoved)) {
-                recordConflict(plan, PlanConflict.Type.TARGET_CLASS_NAME_COLLISION, group.getKey(), List.copyOf(distinct));
-                distinct.stream().filter(TransformationPlanEntry::isMoved).forEach(e ->
-                        demote(e, SafetyLevel.MANUAL_REVIEW, "target class name " + group.getKey() + " collides with another class"));
-                changed = true;
-            }
-        }
-        return changed;
+        demotions.forEach((entry, reason) -> demote(entry, SafetyLevel.MANUAL_REVIEW, reason));
+        return !demotions.isEmpty();
     }
 
     private void recordConflict(TransformationPlan plan, PlanConflict.Type type, String target, List<TransformationPlanEntry> entries) {

@@ -1,0 +1,13 @@
+{
+  "description": "Class names carry no business vocabulary: ArchMorph must not invent modules and must say so.",
+  "modules": [],
+  "ambiguous": true,
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

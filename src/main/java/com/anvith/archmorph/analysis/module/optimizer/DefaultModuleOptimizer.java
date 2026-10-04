@@ -28,9 +28,9 @@ import java.util.TreeMap;
  * Improves the raw discovery result. Rules, in order:
  *
  * <ol>
- *   <li><b>Merge fragments</b>: a module without controller/service/repository and with at most three
- *       classes (typically only a value entity or DTOs) is merged into the module that owns the
- *       majority of its dependencies.</li>
+ *   <li><b>Merge fragments</b>: a module without a controller or entity and with at most three classes
+ *       is merged into the module that owns at least 60% of its dependencies. A fragment without any
+ *       dependency is moved to {@code shared} with a warning.</li>
  *   <li><b>Promote shared</b>: a generic-named class used by at least {@code shared-usage-threshold}
  *       business modules is moved to {@code shared}. Domain-named classes are never moved because
  *       other modules use them; that is reported as a cross-module dependency instead.</li>
@@ -45,8 +45,8 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultModuleOptimizer.class);
 
-    private static final Set<ComponentType> BEHAVIOUR = EnumSet.of(
-            ComponentType.CONTROLLER, ComponentType.SERVICE, ComponentType.REPOSITORY);
+    /** A module with one of these roles is a module in its own right, not a fragment. */
+    private static final Set<ComponentType> ANCHORS = EnumSet.of(ComponentType.CONTROLLER, ComponentType.ENTITY);
 
     private final ArchMorphProperties properties;
     private final ModuleMetricsCalculator metricsCalculator;
@@ -77,11 +77,23 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
             List<ModuleInfo> candidates = new ArrayList<>(report.getBusinessModules());
             candidates.sort(Comparator.comparingInt(ModuleInfo::getClassCount).thenComparing(ModuleInfo::getModuleName));
             for (ModuleInfo fragment : candidates) {
-                if (fragment.getClassCount() > 3 || hasBehaviour(fragment) || anyLocked(report, fragment)) {
+                if (fragment.getClassCount() > 3 || isAnchored(fragment) || anyLocked(report, fragment)) {
                     continue;
                 }
                 Map<String, Integer> weights = dependencyWeightsByModule(report, graph, fragment);
                 int total = weights.values().stream().mapToInt(Integer::intValue).sum();
+                if (total == 0 && !hasDependencies(graph, fragment)) {
+                    for (DependencyNode node : new ArrayList<>(fragment.getClasses())) {
+                        report.assign(node, ModuleDiscoveryReport.SHARED, ModuleCategory.SHARED, 0.4,
+                                ClassAssignment.Origin.AUTOMATIC,
+                                List.of("isolated class without dependencies or business anchors; placed in shared"));
+                    }
+                    report.getWarnings().add("Module '" + fragment.getModuleName()
+                            + "' had no dependencies and no controller or entity; its classes were placed in shared.");
+                    report.pruneEmptyModules();
+                    changed = true;
+                    break;
+                }
                 if (total == 0) {
                     continue;
                 }
@@ -130,8 +142,12 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
         }
     }
 
-    private boolean hasBehaviour(ModuleInfo module) {
-        return module.getClasses().stream().anyMatch(n -> n.getComponentType() != null && BEHAVIOUR.contains(n.getComponentType()));
+    private boolean isAnchored(ModuleInfo module) {
+        return module.getClasses().stream().anyMatch(n -> n.getComponentType() != null && ANCHORS.contains(n.getComponentType()));
+    }
+
+    private boolean hasDependencies(DependencyGraph graph, ModuleInfo module) {
+        return module.getClasses().stream().anyMatch(n -> !graph.getOutgoingEdges(n).isEmpty() || !graph.getIncomingEdges(n).isEmpty());
     }
 
     private boolean anyLocked(ModuleDiscoveryReport report, ModuleInfo module) {

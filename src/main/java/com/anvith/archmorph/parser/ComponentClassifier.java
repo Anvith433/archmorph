@@ -77,7 +77,11 @@ public class ComponentClassifier {
             "JpaSpecificationExecutor", ComponentType.REPOSITORY,
             "AuthenticationEntryPoint", ComponentType.SECURITY,
             "AccessDeniedHandler", ComponentType.SECURITY,
-            "UserDetailsService", ComponentType.SERVICE,
+            "UserDetailsService", ComponentType.SECURITY,
+            "AuthenticationProvider", ComponentType.SECURITY,
+            "AuthenticationSuccessHandler", ComponentType.SECURITY,
+            "AuthenticationFailureHandler", ComponentType.SECURITY,
+            "LogoutHandler", ComponentType.SECURITY,
             "WebMvcConfigurer", ComponentType.CONFIGURATION,
             "WebSecurityConfigurerAdapter", ComponentType.SECURITY,
             "RuntimeException", ComponentType.EXCEPTION,
@@ -233,6 +237,12 @@ public class ComponentClassifier {
         }
         if (methodAnnotations.contains(AnnotationConstants.BEAN)) {
             candidates.add(new Candidate(ComponentType.CONFIGURATION, Layer.STRUCTURE, "declares @Bean methods"));
+        }
+        boolean hasMain = metadata.getMethodDetails().stream().anyMatch(m -> m.name().equals("main")
+                && m.modifiers().contains("static") && m.parameters().size() == 1
+                && m.parameters().getFirst().type().replace(" ", "").matches("String(\\[\\]|\\.\\.\\.)"));
+        if (hasMain && metadata.getKind() == TypeKind.CLASS) {
+            candidates.add(new Candidate(ComponentType.APPLICATION, Layer.STRUCTURE, "declares a static main(String[]) method"));
         }
         if (metadata.getKind() == TypeKind.RECORD && metadata.getMethodDetails().isEmpty()
                 && metadata.getAnnotations().isEmpty()) {

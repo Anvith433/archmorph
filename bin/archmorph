@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# ArchMorph command-line launcher. Build first:  ./mvnw -DskipTests package
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+JAR="$(ls "$DIR"/target/archmorph-ai-*.jar 2>/dev/null | grep -v original | head -n 1 || true)"
+if [ -z "$JAR" ]; then
+  echo "ArchMorph jar not found. Run './mvnw -DskipTests package' first." >&2
+  exit 2
+fi
+exec java -jar "$JAR" "$@"

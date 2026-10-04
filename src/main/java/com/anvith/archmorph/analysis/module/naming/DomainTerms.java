@@ -34,13 +34,18 @@ public final class DomainTerms {
             "New", "Edit", "Register", "Upsert", "Default", "Abstract", "Base", "Simple", "Paged", "Page");
 
     /** Terms that never name a business module. */
-    public static final Set<String> GENERIC_TERMS = Set.of(
+    public static final Set<String> GENERIC_TERMS = Set.copyOf(List.of(
             "", "base", "abstract", "common", "shared", "app", "application", "api", "main", "web", "global",
             "default", "generic", "core", "util", "utils", "helper", "error", "errors", "exception", "response",
             "request", "page", "result", "message", "constants", "constant", "config", "custom", "my", "impl",
             "v1", "v2", "v3", "rest", "public", "internal", "entity", "dto", "model", "data", "info",
             "resource", "not", "found", "bad", "invalid", "already", "exists", "exist", "unauthorized",
-            "forbidden", "conflict", "validation");
+            "forbidden", "conflict", "validation",
+            // role words that name a technical function, not a business domain
+            "processor", "manager", "handler", "provider", "factory", "builder", "service", "controller",
+            "repository", "facade", "adapter", "listener", "validator", "converter", "mapper", "client",
+            "gateway", "task", "job", "worker", "runner", "component", "bean", "context", "registry",
+            "strategy", "wrapper", "helper", "foo", "bar", "baz", "main", "type", "status"));
 
     /** Domain stem of a class name: role suffixes and verb prefixes removed, lower case. */
     public static String stem(String className) {

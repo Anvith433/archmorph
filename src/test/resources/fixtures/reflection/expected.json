@@ -1,0 +1,23 @@
+{
+  "description": "Reflection, dynamic proxies and explicit package scanning must never be moved silently.",
+  "modules": null,
+  "kept": [
+    "com.demo.App",
+    "com.demo.plugin.PluginService",
+    "com.demo.service.ReflectiveLoader",
+    "com.demo.service.ProxyFactory",
+    "com.demo.config.ScanConfig"
+  ],
+  "manualReview": [
+    "com.demo.service.ReflectiveLoader",
+    "com.demo.plugin.PluginService",
+    "com.demo.config.ScanConfig"
+  ],
+  "unsupported": [
+    "com.demo.service.ProxyFactory"
+  ],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

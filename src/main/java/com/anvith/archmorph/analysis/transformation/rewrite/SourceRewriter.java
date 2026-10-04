@@ -9,26 +9,19 @@ import com.anvith.archmorph.analysis.transformation.rewrite.RewriteResult.Import
 import com.anvith.archmorph.common.exception.JavaParsingException;
 import com.anvith.archmorph.parser.JavaParserService;
 import com.anvith.archmorph.parser.ParsedSource;
-import com.github.javaparser.JavaParser;
 import com.github.javaparser.Position;
-import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.PackageDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
-import com.github.javaparser.ast.comments.BlockComment;
 import com.github.javaparser.ast.comments.Comment;
-import com.github.javaparser.ast.comments.JavadocComment;
-import com.github.javaparser.ast.comments.LineComment;
 import com.github.javaparser.ast.expr.AnnotationExpr;
-import com.github.javaparser.ast.expr.Expression;
-import com.github.javaparser.ast.expr.FieldAccessExpr;
-import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
-import com.github.javaparser.printer.lexicalpreservation.LexicalPreservingPrinter;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +32,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Deterministic, AST-based source rewriting.
+ * Deterministic, AST-driven source rewriting.
  *
  * <ol>
  *   <li>change the package declaration</li>
@@ -50,10 +43,14 @@ import java.util.regex.Pattern;
  *   <li>keep unrelated and external imports untouched</li>
  * </ol>
  *
- * <p>Node edits (package, qualified references, comments) use JavaParser's lexical-preserving printer, so
- * formatting and comments survive. The import block is regenerated explicitly from the AST, keeping its
- * original grouping and ordering; the lexical printer alone does not produce clean whitespace for
- * inserted or removed imports. Nested types move with their top-level type.</p>
+ * <p><b>How:</b> JavaParser parses the file and the import-aware resolver decides <em>what</em> must change;
+ * the AST node ranges decide exactly <em>where</em>. The edits are then applied to the original text, so
+ * everything the transformation does not touch (formatting, comments, blank lines, line endings) is preserved
+ * byte for byte. No regular expression is used to find code; the only pattern matching is for exact
+ * fully-qualified names inside comments. (JavaParser's lexical-preserving printer was evaluated and not
+ * used: it did not reliably reflect type changes inside local variable declarations.)</p>
+ *
+ * <p>Nested types move with their top-level type: {@code Outer.Inner} imports and references follow {@code Outer}.</p>
  */
 @Service
 public class SourceRewriter {
@@ -75,6 +72,10 @@ public class SourceRewriter {
         }
     }
 
+    /** Replace [start, end) of the original text. */
+    private record Edit(int start, int end, String replacement) {
+    }
+
     /**
      * @param source      original source text
      * @param newPackage  package declaration after the transformation (equal to the old one when the file is not moved)
@@ -82,135 +83,93 @@ public class SourceRewriter {
      * @param registry    registry of all project types (old names)
      */
     public RewriteResult rewrite(String source, String newPackage, Map<String, String> classMap, ProjectClassRegistry registry) {
-        JavaParser parser = javaParserService.createParser();
-        ParsedSource parsed = javaParserService.parse(parser, source);
+        ParsedSource parsed = javaParserService.parse(javaParserService.createParser(), source);
         if (!parsed.successful()) {
             throw new JavaParsingException("The file could not be parsed and cannot be rewritten.");
         }
         CompilationUnit cu = parsed.compilationUnit();
-        LexicalPreservingPrinter.setup(cu);
+        LineIndex lines = new LineIndex(source);
 
         String oldPackage = cu.getPackageDeclaration().map(PackageDeclaration::getNameAsString).orElse("");
-        TypeContext context = TypeContext.of(cu);
         TypeResolver resolver = new TypeResolver(registry, Set.of());
-        List<ReferenceFinder.Reference> references = ReferenceFinder.find(cu, context, resolver);
+        List<ReferenceFinder.Reference> references = ReferenceFinder.find(cu, TypeContext.of(cu), resolver);
 
         List<ImportChange> importChanges = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        List<Edit> edits = new ArrayList<>();
 
-        // Plan the imports from the unmodified AST, then edit nodes, print, and splice the import block.
+        int qualified = qualifiedEdits(references, classMap, lines, edits);
+        commentEdits(cu, classMap, source, lines, edits);
         ImportPlan importPlan = planImports(cu, newPackage, classMap, registry, references, importChanges, warnings);
+        boolean packageChanged = !oldPackage.equals(newPackage);
+        headerEdits(cu, source, lines, newPackage, packageChanged, importPlan, edits, warnings);
 
-        int qualified = rewriteQualified(references, classMap);
-        rewriteComments(cu, classMap);
-        boolean packageChanged = rewritePackage(cu, oldPackage, newPackage);
-
-        String printed = LexicalPreservingPrinter.print(cu);
-        String result = spliceImports(printed, importPlan, warnings);
+        String result = apply(source, edits, warnings);
         return new RewriteResult(result, !result.equals(source), List.copyOf(importChanges), qualified, packageChanged,
                 List.copyOf(warnings));
     }
 
-    // ------------------------------------------------------------------ package
-
-    private boolean rewritePackage(CompilationUnit cu, String oldPackage, String newPackage) {
-        if (oldPackage.equals(newPackage)) {
-            return false;
-        }
-        if (newPackage.isEmpty()) {
-            cu.removePackageDeclaration();
-        } else if (cu.getPackageDeclaration().isPresent()) {
-            // Renamed in place: keeps the whitespace and annotations around the declaration.
-            cu.getPackageDeclaration().get().setName(newPackage);
-        } else {
-            cu.setPackageDeclaration(newPackage);
-        }
-        return true;
-    }
-
     // ------------------------------------------------------------------ qualified references
 
-    private int rewriteQualified(List<ReferenceFinder.Reference> references, Map<String, String> classMap) {
+    private int qualifiedEdits(List<ReferenceFinder.Reference> references, Map<String, String> classMap, LineIndex lines,
+                               List<Edit> edits) {
         int count = 0;
         for (ReferenceFinder.Reference reference : references) {
             String newTop = classMap.getOrDefault(reference.oldTopLevel(), reference.oldTopLevel());
             if (newTop.equals(reference.oldTopLevel())) {
                 continue;
             }
-            switch (reference.kind()) {
-                case QUALIFIED_TYPE -> {
-                    ClassOrInterfaceType type = (ClassOrInterfaceType) reference.node();
-                    String pkg = packageOf(newTop);
-                    if (pkg.isEmpty()) {
-                        type.removeScope();
-                    } else {
-                        type.setScope(typeScope(pkg));
-                    }
+            Node span = switch (reference.kind()) {
+                case QUALIFIED_TYPE -> null;
+                case QUALIFIED_EXPRESSION -> reference.node();
+                case QUALIFIED_ANNOTATION -> ((AnnotationExpr) reference.node()).getName();
+                case SIMPLE -> null;
+            };
+            if (reference.kind() == ReferenceFinder.Kind.QUALIFIED_TYPE) {
+                // From the start of the scope to the end of the simple name; type arguments stay untouched.
+                ClassOrInterfaceType type = (ClassOrInterfaceType) reference.node();
+                Optional<Position> begin = type.getBegin();
+                Optional<Position> end = type.getName().getEnd();
+                if (begin.isPresent() && end.isPresent()) {
+                    edits.add(new Edit(lines.offset(begin.get()), lines.offset(end.get()) + 1, newTop));
                     count++;
                 }
-                case QUALIFIED_EXPRESSION -> {
-                    FieldAccessExpr access = (FieldAccessExpr) reference.node();
-                    access.replace(expression(newTop));
-                    count++;
-                }
-                case QUALIFIED_ANNOTATION -> {
-                    AnnotationExpr annotation = (AnnotationExpr) reference.node();
-                    annotation.setName(StaticJavaParser.parseName(newTop + reference.remainder()));
-                    count++;
-                }
-                default -> {
-                    // SIMPLE references keep their spelling; imports are handled separately.
-                }
+            } else if (span != null && span.getBegin().isPresent() && span.getEnd().isPresent()) {
+                String replacement = newTop + reference.remainder();
+                edits.add(new Edit(lines.offset(span.getBegin().get()), lines.offset(span.getEnd().get()) + 1, replacement));
+                count++;
             }
         }
         return count;
     }
 
-    private ClassOrInterfaceType typeScope(String pkg) {
-        ClassOrInterfaceType scope = null;
-        for (String segment : pkg.split("\\.")) {
-            scope = new ClassOrInterfaceType(scope, segment);
-        }
-        return scope;
-    }
-
-    private Expression expression(String qualified) {
-        String[] segments = qualified.split("\\.");
-        Expression expression = new NameExpr(segments[0]);
-        for (int i = 1; i < segments.length; i++) {
-            expression = new FieldAccessExpr(expression, segments[i]);
-        }
-        return expression;
-    }
-
-    /**
-     * Rewrites exact fully-qualified occurrences of moved classes inside comments (Javadoc
-     * {@code {@link ...}}). Comments are replaced as a whole because the lexical printer does not
-     * track in-place content changes.
-     */
-    private void rewriteComments(CompilationUnit cu, Map<String, String> classMap) {
-        for (Comment comment : cu.getAllContainedComments()) {
-            String content = comment.getContent();
-            String updated = content;
+    /** Exact fully-qualified names of moved classes inside comments, e.g. Javadoc {@code {@link ...}}. */
+    private void commentEdits(CompilationUnit cu, Map<String, String> classMap, String source, LineIndex lines, List<Edit> edits) {
+        for (Comment comment : cu.getAllComments()) {
+            if (comment.getBegin().isEmpty() || comment.getEnd().isEmpty()) {
+                continue;
+            }
+            int start = lines.offset(comment.getBegin().get());
+            int end = lines.offset(comment.getEnd().get()) + 1;
+            String text = source.substring(start, end);
+            String updated = text;
             for (Map.Entry<String, String> entry : classMap.entrySet()) {
                 if (!entry.getKey().equals(entry.getValue()) && updated.contains(entry.getKey())) {
                     updated = Pattern.compile("(?<![A-Za-z0-9_$.])" + Pattern.quote(entry.getKey()) + "(?![A-Za-z0-9_$])")
                             .matcher(updated).replaceAll(Matcher.quoteReplacement(entry.getValue()));
                 }
             }
-            if (updated.equals(content)) {
-                continue;
+            if (!updated.equals(text)) {
+                edits.add(new Edit(start, end, updated));
             }
-            Comment replacement = comment instanceof JavadocComment ? new JavadocComment(updated)
-                    : comment instanceof BlockComment ? new BlockComment(updated) : new LineComment(updated);
-            comment.getCommentedNode().ifPresent(node -> node.setComment(replacement));
         }
     }
 
     // ------------------------------------------------------------------ imports
 
-    /** Final import groups plus how to place them into the file. */
-    private record ImportPlan(List<List<Imp>> groups, boolean hadImports, boolean changed, boolean commentsInside) {
+    /** Final import groups plus the information needed to place them. */
+    private record ImportPlan(List<List<Imp>> groups, List<Optional<Imp>> perImport, List<Imp> additions,
+                              boolean changed, boolean commentsInside) {
     }
 
     private ImportPlan planImports(CompilationUnit cu, String newPackage, Map<String, String> classMap,
@@ -240,13 +199,14 @@ public class SourceRewriter {
         if (!cu.getImports().isEmpty()) {
             int first = cu.getImports().get(0).getBegin().map(p -> p.line).orElse(0);
             int last = cu.getImports().get(cu.getImports().size() - 1).getEnd().map(p -> p.line).orElse(0);
-            commentsInside = cu.getAllContainedComments().stream().anyMatch(c ->
+            commentsInside = cu.getAllComments().stream().anyMatch(c ->
                     c.getBegin().map(p -> p.line >= first && p.line <= last).orElse(false));
         }
 
         Set<String> present = new LinkedHashSet<>();
         List<List<Imp>> groups = new ArrayList<>();
         List<Boolean> groupSorted = new ArrayList<>();
+        List<Optional<Imp>> perImport = new ArrayList<>();
         boolean changed = false;
 
         for (List<ImportDeclaration> originalGroup : originalGroups) {
@@ -262,16 +222,16 @@ public class SourceRewriter {
                 } else {
                     result = rewriteSingle(name, newPackage, classMap, registry, changes, present);
                 }
+                perImport.add(result);
                 if (result.isEmpty()) {
                     changed = true;
                     continue;
                 }
-                Imp updated = result.get();
-                changed |= !updated.name().equals(name);
-                rewritten.add(updated);
+                changed |= !result.get().name().equals(name);
+                rewritten.add(result.get());
             }
             if (sorted) {
-                rewritten.sort(java.util.Comparator.comparing(Imp::sortKey));
+                rewritten.sort(Comparator.comparing(Imp::sortKey));
             }
             groups.add(rewritten);
             groupSorted.add(sorted);
@@ -299,7 +259,7 @@ public class SourceRewriter {
             addToRegularGroup(groups, groupSorted, originalGroups, additions);
         }
         groups.removeIf(List::isEmpty);
-        return new ImportPlan(groups, !cu.getImports().isEmpty(), changed, commentsInside);
+        return new ImportPlan(groups, perImport, additions, changed, commentsInside);
     }
 
     /** Add to the last regular-import group (sorted in place when that group is sorted); create one if absent. */
@@ -307,22 +267,21 @@ public class SourceRewriter {
                                    List<List<ImportDeclaration>> originalGroups, List<Imp> additions) {
         int target = -1;
         for (int i = 0; i < groups.size(); i++) {
-            List<ImportDeclaration> original = originalGroups.get(i);
-            boolean regular = original.stream().anyMatch(d -> !d.isStatic());
-            if (regular) {
+            if (originalGroups.get(i).stream().anyMatch(d -> !d.isStatic())) {
                 target = i;
             }
         }
         if (target < 0) {
-            groups.add(new ArrayList<>(additions));
+            List<Imp> group = new ArrayList<>(additions);
+            group.sort(Comparator.comparing(Imp::sortKey));
+            groups.add(group);
             groupSorted.add(true);
-            groups.getLast().sort(java.util.Comparator.comparing(Imp::sortKey));
             return;
         }
         List<Imp> group = groups.get(target);
         group.addAll(additions);
         if (groupSorted.get(target)) {
-            group.sort(java.util.Comparator.comparing(Imp::sortKey));
+            group.sort(Comparator.comparing(Imp::sortKey));
         }
     }
 
@@ -384,55 +343,107 @@ public class SourceRewriter {
         return Optional.of(new Imp(name, true, imp.isAsterisk()));
     }
 
-    /** Replace the import block of the printed source with the planned groups. */
-    private String spliceImports(String printed, ImportPlan plan, List<String> warnings) {
-        if (!plan.changed()) {
-            return printed;
-        }
-        ParsedSource reparsed = javaParserService.parse(javaParserService.createParser(), printed);
-        if (!reparsed.successful()) {
-            warnings.add("The rewritten source could not be re-read; imports were left unchanged.");
-            return printed;
-        }
-        CompilationUnit cu = reparsed.compilationUnit();
-        if (plan.commentsInside()) {
-            warnings.add("The import block contains comments; its layout could not be preserved exactly.");
-        }
+    // ------------------------------------------------------------------ package declaration + import block
 
+    private void headerEdits(CompilationUnit cu, String source, LineIndex lines, String newPackage, boolean packageChanged,
+                             ImportPlan plan, List<Edit> edits, List<String> warnings) {
+        Optional<PackageDeclaration> pkg = cu.getPackageDeclaration();
+        boolean hadImports = !cu.getImports().isEmpty();
         String block = plan.groups().stream()
                 .map(group -> String.join("\n", group.stream().map(Imp::line).toList()))
                 .reduce((a, b) -> a + "\n\n" + b).orElse("");
-        LineIndex lines = new LineIndex(printed);
 
-        if (plan.hadImports()) {
-            ImportDeclaration first = cu.getImports().get(0);
-            ImportDeclaration last = cu.getImports().get(cu.getImports().size() - 1);
-            int start = lines.offset(first.getBegin().orElseThrow());
-            int end = lines.offset(last.getEnd().orElseThrow()) + 1;
-            if (block.isEmpty()) {
-                // Remove the block and one adjoining blank line so no double gap remains.
-                int from = start;
-                int to = end;
-                while (to < printed.length() && (printed.charAt(to) == '\n' || printed.charAt(to) == '\r')) {
-                    to++;
-                }
-                return printed.substring(0, from) + printed.substring(to);
+        // 1. package declaration
+        String prefix = "";
+        if (packageChanged) {
+            if (pkg.isPresent() && !newPackage.isEmpty()) {
+                var name = pkg.get().getName();
+                edits.add(new Edit(lines.offset(name.getBegin().orElseThrow()), lines.offset(name.getEnd().orElseThrow()) + 1, newPackage));
+            } else if (pkg.isPresent()) {
+                int start = lines.offset(pkg.get().getBegin().orElseThrow());
+                int end = skipLineBreaks(source, lines.offset(pkg.get().getEnd().orElseThrow()) + 1);
+                edits.add(new Edit(start, end, ""));
+            } else {
+                prefix = "package " + newPackage + ";\n\n";
             }
-            return printed.substring(0, start) + block + printed.substring(end);
         }
 
-        // No imports before: insert after the package declaration, or at the first type / comment.
-        Optional<PackageDeclaration> pkg = cu.getPackageDeclaration();
-        if (pkg.isPresent()) {
-            int end = lines.offset(pkg.get().getEnd().orElseThrow()) + 1;
-            return printed.substring(0, end) + "\n\n" + block + printed.substring(end);
+        // 2. import block
+        if (!plan.changed()) {
+            if (!prefix.isEmpty()) {
+                int at = firstCodeOffset(cu, lines);
+                edits.add(new Edit(at, at, prefix));
+            }
+            return;
         }
-        int start = firstCodeOffset(cu, lines);
-        return printed.substring(0, start) + block + "\n\n" + printed.substring(start);
+        if (hadImports && plan.commentsInside()) {
+            importLineEdits(cu, source, lines, plan, edits);
+            warnings.add("The import block contains comments; imports were updated line by line.");
+            if (!prefix.isEmpty()) {
+                int at = firstCodeOffset(cu, lines);
+                edits.add(new Edit(at, at, prefix));
+            }
+            return;
+        }
+        if (hadImports) {
+            int start = lines.offset(cu.getImports().get(0).getBegin().orElseThrow());
+            int end = lines.offset(cu.getImports().get(cu.getImports().size() - 1).getEnd().orElseThrow()) + 1;
+            if (block.isEmpty()) {
+                end = skipLineBreaks(source, end);
+            }
+            edits.add(new Edit(start, end, block));
+            if (!prefix.isEmpty()) {
+                edits.add(new Edit(start, start, prefix));
+            }
+            return;
+        }
+        if (block.isEmpty()) {
+            if (!prefix.isEmpty()) {
+                int at = firstCodeOffset(cu, lines);
+                edits.add(new Edit(at, at, prefix));
+            }
+            return;
+        }
+        if (pkg.isPresent() && !(packageChanged && newPackage.isEmpty())) {
+            int end = lines.offset(pkg.get().getEnd().orElseThrow()) + 1;
+            edits.add(new Edit(end, end, "\n\n" + block));
+        } else {
+            int at = firstCodeOffset(cu, lines);
+            edits.add(new Edit(at, at, prefix + block + "\n\n"));
+        }
+    }
+
+    /** Fallback when comments sit between imports: rewrite each import on its own line, append additions. */
+    private void importLineEdits(CompilationUnit cu, String source, LineIndex lines, ImportPlan plan, List<Edit> edits) {
+        int lastRegularEnd = -1;
+        for (int i = 0; i < cu.getImports().size(); i++) {
+            ImportDeclaration imp = cu.getImports().get(i);
+            int start = lines.offset(imp.getBegin().orElseThrow());
+            int end = lines.offset(imp.getEnd().orElseThrow()) + 1;
+            Optional<Imp> result = plan.perImport().get(i);
+            if (result.isEmpty()) {
+                edits.add(new Edit(start, skipLineBreaks(source, end, 1), ""));
+            } else {
+                edits.add(new Edit(start, end, result.get().line()));
+                if (!imp.isStatic()) {
+                    lastRegularEnd = end;
+                }
+            }
+        }
+        if (!plan.additions().isEmpty()) {
+            int at = lastRegularEnd >= 0 ? lastRegularEnd
+                    : lines.offset(cu.getImports().get(cu.getImports().size() - 1).getEnd().orElseThrow()) + 1;
+            StringBuilder text = new StringBuilder();
+            plan.additions().forEach(a -> text.append('\n').append(a.line()));
+            edits.add(new Edit(at, at, text.toString()));
+        }
     }
 
     private int firstCodeOffset(CompilationUnit cu, LineIndex lines) {
         int offset = Integer.MAX_VALUE;
+        for (ImportDeclaration imp : cu.getImports()) {
+            offset = Math.min(offset, lines.offset(imp.getBegin().orElseThrow()));
+        }
         for (TypeDeclaration<?> type : cu.getTypes()) {
             offset = Math.min(offset, lines.offset(type.getBegin().orElseThrow()));
             if (type.getComment().isPresent() && type.getComment().get().getBegin().isPresent()) {
@@ -440,6 +451,42 @@ public class SourceRewriter {
             }
         }
         return offset == Integer.MAX_VALUE ? 0 : offset;
+    }
+
+    // ------------------------------------------------------------------ edit application
+
+    private String apply(String source, List<Edit> edits, List<String> warnings) {
+        List<Edit> ordered = new ArrayList<>(edits);
+        // Descending start; for equal starts apply the later-registered insertion first so text keeps registration order.
+        ordered.sort(Comparator.comparingInt(Edit::start).thenComparingInt(Edit::end).reversed());
+        StringBuilder text = new StringBuilder(source);
+        int limit = Integer.MAX_VALUE;
+        for (Edit edit : ordered) {
+            if (edit.end() > limit) {
+                warnings.add("Overlapping rewrite skipped near offset " + edit.start() + ".");
+                continue;
+            }
+            text.replace(edit.start(), edit.end(), edit.replacement());
+            limit = edit.start();
+        }
+        return text.toString();
+    }
+
+    private static int skipLineBreaks(String source, int offset) {
+        return skipLineBreaks(source, offset, Integer.MAX_VALUE);
+    }
+
+    private static int skipLineBreaks(String source, int offset, int maxLines) {
+        int position = offset;
+        int newlines = 0;
+        while (position < source.length() && newlines < maxLines
+                && (source.charAt(position) == '\n' || source.charAt(position) == '\r')) {
+            if (source.charAt(position) == '\n') {
+                newlines++;
+            }
+            position++;
+        }
+        return position;
     }
 
     private static boolean isSorted(List<ImportDeclaration> imports) {

@@ -32,7 +32,8 @@ import java.util.Set;
 public class DefaultCircularDependencyDetector implements CircularDependencyDetector {
 
     private static final Set<DependencyType> ENTITY_KINDS =
-            EnumSet.of(DependencyType.ENTITY_RELATIONSHIP, DependencyType.GENERIC, DependencyType.FIELD);
+            EnumSet.of(DependencyType.ENTITY_RELATIONSHIP, DependencyType.GENERIC, DependencyType.FIELD,
+                    DependencyType.METHOD_RETURN, DependencyType.METHOD_PARAMETER, DependencyType.TYPE_REFERENCE);
 
     @Override
     public CycleReport detect(DependencyGraph graph) {
