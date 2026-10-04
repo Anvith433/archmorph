@@ -1,0 +1,19 @@
+{
+  "description": "All classes live in the default package; they can move into named packages, the main class stays.",
+  "modules": [
+    "user"
+  ],
+  "moved": {
+    "User": "modules.user.common.User",
+    "UserService": "modules.user.service.UserService",
+    "UserRepository": "modules.user.repository.UserRepository"
+  },
+  "kept": [
+    "Main"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

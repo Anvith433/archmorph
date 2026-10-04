@@ -1,0 +1,21 @@
+{
+  "description": "Nested types, several top-level types per file, nested imports, static imports of nested members.",
+  "modules": [
+    "order"
+  ],
+  "moved": {
+    "com.demo.service.OrderService": "com.demo.modules.order.service.OrderService",
+    "com.demo.service.OrderService.Summary": "com.demo.modules.order.service.OrderService.Summary",
+    "com.demo.service.OrderService.Status": "com.demo.modules.order.service.OrderService.Status",
+    "com.demo.service.PriceCalc": "com.demo.modules.order.service.PriceCalc",
+    "com.demo.service.PriceRounding": "com.demo.modules.order.service.PriceRounding"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

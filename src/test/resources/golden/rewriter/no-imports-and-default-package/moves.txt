@@ -1,0 +1,3 @@
+Main = com.demo.app.Main
+com.demo.util.Helper = com.demo.shared.common.Helper
+com.demo.util.Calculator = com.demo.modules.pricing.service.Calculator

@@ -1,5 +1,6 @@
 package com.anvith.archmorph.analysis.transformation;
 
+/** Sub-package inside a module (or inside {@code shared}) that holds one kind of class. */
 public enum FolderType {
 
     CONTROLLER("controller"),
@@ -13,6 +14,10 @@ public enum FolderType {
     DTO("dto"),
 
     CONFIGURATION("config"),
+
+    SECURITY("security"),
+
+    INFRASTRUCTURE("infrastructure"),
 
     COMPONENT("component"),
 
@@ -29,5 +34,4 @@ public enum FolderType {
     public String getFolderName() {
         return folderName;
     }
-
 }

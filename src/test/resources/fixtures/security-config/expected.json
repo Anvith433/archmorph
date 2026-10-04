@@ -1,0 +1,30 @@
+{
+  "description": "Security infrastructure (config, filter, token provider, UserDetailsService) is routed to shared/security, not into business modules.",
+  "modules": [
+    "auth",
+    "user"
+  ],
+  "moved": {
+    "com.demo.config.SecurityConfig": "com.demo.shared.security.SecurityConfig",
+    "com.demo.security.JwtAuthenticationFilter": "com.demo.shared.security.JwtAuthenticationFilter",
+    "com.demo.security.JwtTokenProvider": "com.demo.shared.security.JwtTokenProvider",
+    "com.demo.security.UserDetailsServiceImpl": "com.demo.shared.security.UserDetailsServiceImpl",
+    "com.demo.controller.AuthController": "com.demo.modules.auth.controller.AuthController",
+    "com.demo.dto.LoginRequest": "com.demo.modules.auth.dto.LoginRequest",
+    "com.demo.service.UserService": "com.demo.modules.user.service.UserService"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "sharedClasses": [
+    "com.demo.config.SecurityConfig",
+    "com.demo.security.JwtAuthenticationFilter",
+    "com.demo.security.JwtTokenProvider",
+    "com.demo.security.UserDetailsServiceImpl"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

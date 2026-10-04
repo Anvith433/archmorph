@@ -1,0 +1,27 @@
+{
+  "description": "user.dto.UserResponse and admin.dto.UserResponse would map to the same target: they must not overwrite each other.",
+  "modules": [
+    "admin",
+    "user"
+  ],
+  "moved": {
+    "com.demo.controller.UserController": "com.demo.modules.user.controller.UserController",
+    "com.demo.controller.AdminController": "com.demo.modules.admin.controller.AdminController"
+  },
+  "kept": [
+    "com.demo.App",
+    "com.demo.user.dto.UserResponse",
+    "com.demo.admin.dto.UserResponse"
+  ],
+  "manualReview": [
+    "com.demo.user.dto.UserResponse",
+    "com.demo.admin.dto.UserResponse"
+  ],
+  "conflicts": [
+    "TARGET_CLASS_NAME_COLLISION",
+    "TARGET_PATH_COLLISION"
+  ],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

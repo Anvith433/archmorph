@@ -1,40 +1,29 @@
 package com.anvith.archmorph.analysis.architecture.rules;
 
+import com.anvith.archmorph.analysis.architecture.Severity;
 import com.anvith.archmorph.parser.ComponentType;
 
 /**
- * Represents one architecture rule.
- *
- * Example:
- *
- * CONTROLLER -> SERVICE
- * allowed = true
+ * One architecture rule, e.g. {@code CONTROLLER -> REPOSITORY, allowed = false}.
  */
 public class LayerRule {
 
-    /*
-     * Source Layer
-     */
     private final ComponentType source;
-
-    /*
-     * Target Layer
-     */
     private final ComponentType target;
-
-    /*
-     * Is this dependency allowed?
-     */
     private final boolean allowed;
+    private final Severity severity;
+    private final String rationale;
 
-    public LayerRule(
-            ComponentType source,
-            ComponentType target,
-            boolean allowed) {
+    public LayerRule(ComponentType source, ComponentType target, boolean allowed) {
+        this(source, target, allowed, Severity.MEDIUM, null);
+    }
 
+    public LayerRule(ComponentType source, ComponentType target, boolean allowed, Severity severity, String rationale) {
         this.source = source;
         this.target = target;
         this.allowed = allowed;
+        this.severity = severity;
+        this.rationale = rationale;
     }
 
     public ComponentType getSource() {
@@ -49,4 +38,11 @@ public class LayerRule {
         return allowed;
     }
 
+    public Severity getSeverity() {
+        return severity;
+    }
+
+    public String getRationale() {
+        return rationale;
+    }
 }

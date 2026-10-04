@@ -1,0 +1,27 @@
+{
+  "description": "Mutually dependent services and bidirectional entity relationships: cycles are reported, never rewritten.",
+  "modules": [
+    "order",
+    "payment",
+    "user"
+  ],
+  "moved": {
+    "com.demo.service.OrderService": "com.demo.modules.order.service.OrderService",
+    "com.demo.service.PaymentService": "com.demo.modules.payment.service.PaymentService",
+    "com.demo.entity.User": "com.demo.modules.user.entity.User",
+    "com.demo.entity.Order": "com.demo.modules.order.entity.Order"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 2,
+  "cycleSeverities": [
+    "LOW",
+    "MEDIUM"
+  ],
+  "compiles": true
+}

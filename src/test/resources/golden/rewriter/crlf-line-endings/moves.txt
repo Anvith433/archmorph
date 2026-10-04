@@ -1,0 +1,2 @@
+com.demo.service.UserService = com.demo.modules.user.service.UserService
+com.demo.entity.User = com.demo.modules.user.entity.User

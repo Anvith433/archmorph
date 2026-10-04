@@ -7,50 +7,55 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Represents one Java class/interface
- * in the dependency graph.
+ * Represents one top-level Java type in the dependency graph.
+ *
+ * <p>Identity is the fully-qualified name. Two classes with the same simple
+ * name in different packages are different nodes.</p>
  */
 public class DependencyNode {
 
-    /*
-     * Class Name
-     */
     private String className;
 
-    /*
-     * Package Name
-     */
     private String packageName;
 
-    /*
-     * Component Type
-     */
+    private String qualifiedName;
+
     private ComponentType componentType;
 
-    /*
-     * NEW
-     * Original Java source file.
-     */
+    private double classificationConfidence;
+
+    /** True for types outside the project (framework / JDK). */
+    private boolean external;
+
+    /** Project-relative source path. */
+    private String relativePath;
+
+    /** Original Java source file (server-side only). */
     private Path sourceFile;
 
-    /*
-     * NEW
-     * Parsed AST.
-     * This avoids reparsing later.
-     */
-    private CompilationUnit compilationUnit;
+    /** Parsed AST. This avoids reparsing later. */
+    private transient CompilationUnit compilationUnit;
 
     public DependencyNode() {
     }
 
-    public DependencyNode(
-            String className,
-            String packageName,
-            ComponentType componentType) {
-
+    public DependencyNode(String className, String packageName, ComponentType componentType) {
         this.className = className;
         this.packageName = packageName;
         this.componentType = componentType;
+        this.qualifiedName = packageName == null || packageName.isBlank() ? className : packageName + "." + className;
+    }
+
+    public DependencyNode(String qualifiedName, String className, String packageName, ComponentType componentType) {
+        this.qualifiedName = qualifiedName;
+        this.className = className;
+        this.packageName = packageName;
+        this.componentType = componentType;
+    }
+
+    /** Identity key: qualified name, or simple name for legacy nodes. */
+    public String getId() {
+        return qualifiedName != null ? qualifiedName : className;
     }
 
     public String getClassName() {
@@ -69,12 +74,44 @@ public class DependencyNode {
         this.packageName = packageName;
     }
 
+    public String getQualifiedName() {
+        return qualifiedName;
+    }
+
+    public void setQualifiedName(String qualifiedName) {
+        this.qualifiedName = qualifiedName;
+    }
+
     public ComponentType getComponentType() {
         return componentType;
     }
 
     public void setComponentType(ComponentType componentType) {
         this.componentType = componentType;
+    }
+
+    public double getClassificationConfidence() {
+        return classificationConfidence;
+    }
+
+    public void setClassificationConfidence(double classificationConfidence) {
+        this.classificationConfidence = classificationConfidence;
+    }
+
+    public boolean isExternal() {
+        return external;
+    }
+
+    public void setExternal(boolean external) {
+        this.external = external;
+    }
+
+    public String getRelativePath() {
+        return relativePath;
+    }
+
+    public void setRelativePath(String relativePath) {
+        this.relativePath = relativePath;
     }
 
     public Path getSourceFile() {
@@ -89,39 +126,28 @@ public class DependencyNode {
         return compilationUnit;
     }
 
-    public void setCompilationUnit(
-            CompilationUnit compilationUnit) {
-
+    public void setCompilationUnit(CompilationUnit compilationUnit) {
         this.compilationUnit = compilationUnit;
     }
 
     @Override
     public String toString() {
-
-        return className +
-                " (" +
-                componentType +
-                ")";
+        return className + " (" + componentType + ")";
     }
 
     @Override
     public boolean equals(Object o) {
-
-        if (this == o)
+        if (this == o) {
             return true;
-
-        if (!(o instanceof DependencyNode))
+        }
+        if (!(o instanceof DependencyNode that)) {
             return false;
-
-        DependencyNode that = (DependencyNode) o;
-
-        return Objects.equals(className, that.className);
+        }
+        return Objects.equals(getId(), that.getId());
     }
 
     @Override
     public int hashCode() {
-
-        return Objects.hash(className);
+        return Objects.hashCode(getId());
     }
-
 }

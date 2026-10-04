@@ -1,0 +1,22 @@
+{
+  "description": "Nested package structure with wildcard imports, fully-qualified references and static imports.",
+  "modules": [
+    "order",
+    "user"
+  ],
+  "moved": {
+    "com.demo.domain.model.User": "com.demo.modules.user.entity.User",
+    "com.demo.domain.model.Order": "com.demo.modules.order.entity.Order",
+    "com.demo.web.rest.UserResource": "com.demo.modules.user.controller.UserResource",
+    "com.demo.domain.service.UserService": "com.demo.modules.user.service.UserService",
+    "com.demo.domain.service.OrderService": "com.demo.modules.order.service.OrderService"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

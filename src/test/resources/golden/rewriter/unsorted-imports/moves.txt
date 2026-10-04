@@ -1,0 +1,2 @@
+com.demo.service.PaymentService = com.demo.modules.payment.service.PaymentService
+com.demo.service.OrderService = com.demo.modules.order.service.OrderService

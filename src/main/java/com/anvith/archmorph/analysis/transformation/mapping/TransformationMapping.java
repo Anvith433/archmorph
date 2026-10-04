@@ -1,61 +1,39 @@
 package com.anvith.archmorph.analysis.transformation.mapping;
 
 import com.anvith.archmorph.analysis.dependency.DependencyNode;
+import com.anvith.archmorph.analysis.module.ModuleCategory;
 import com.anvith.archmorph.analysis.transformation.FolderType;
 
 import java.nio.file.Path;
 
+/**
+ * Where one top-level class goes: source and target qualified names,
+ * module, folder and project-relative target file.
+ */
 public class TransformationMapping {
 
-    /*
-     * Original Java class.
-     */
+    /** Original Java class. */
     private DependencyNode node;
 
-    /*
-     * Target business module.
-     */
+    /** Target module ("shared"/"application" for non-business classes). */
     private String moduleName;
 
-    /*
-     * Folder inside the module.
-     *
-     * Examples:
-     * controller
-     * service
-     * repository
-     * entity
-     * dto
-     */
+    private ModuleCategory category = ModuleCategory.BUSINESS_MODULE;
+
+    /** Folder inside the module, e.g. controller, service. */
     private FolderType folderType;
 
-    /*
-     * Original Java package.
-     */
     private String sourcePackage;
 
-    /*
-     * Common project package.
-     *
-     * Example:
-     *
-     * Source:
-     * com.pmj.template.service
-     *
-     * Base:
-     * com.pmj.template
-     */
+    /** Common project root package. */
     private String basePackage;
 
-    /*
-     * Destination Java package.
-     */
     private String targetPackage;
 
-    /*
-     * Destination Java file.
-     */
+    /** Destination file relative to the project root (never absolute). */
     private Path targetFile;
+
+    private double confidence = 1.0;
 
     public DependencyNode getNode() {
         return node;
@@ -71,6 +49,14 @@ public class TransformationMapping {
 
     public void setModuleName(String moduleName) {
         this.moduleName = moduleName;
+    }
+
+    public ModuleCategory getCategory() {
+        return category;
+    }
+
+    public void setCategory(ModuleCategory category) {
+        this.category = category;
     }
 
     public FolderType getFolderType() {
@@ -113,44 +99,25 @@ public class TransformationMapping {
         this.targetFile = targetFile;
     }
 
-    @Override
-    public String toString() {
-
-        StringBuilder builder = new StringBuilder();
-
-        builder.append("----------------------------------------\n");
-
-        builder.append("Class           : ")
-                .append(node.getClassName())
-                .append("\n");
-
-        builder.append("Module          : ")
-                .append(moduleName)
-                .append("\n");
-
-        builder.append("Folder          : ")
-                .append(folderType)
-                .append("\n");
-
-        builder.append("Source Package  : ")
-                .append(sourcePackage)
-                .append("\n");
-
-        builder.append("Base Package    : ")
-                .append(basePackage)
-                .append("\n");
-
-        builder.append("Target Package  : ")
-                .append(targetPackage)
-                .append("\n");
-
-        builder.append("Target File     : ")
-                .append(targetFile)
-                .append("\n");
-
-        builder.append("----------------------------------------");
-
-        return builder.toString();
+    public double getConfidence() {
+        return confidence;
     }
 
+    public void setConfidence(double confidence) {
+        this.confidence = confidence;
+    }
+
+    public String getSourceQualifiedName() {
+        return node.getQualifiedName();
+    }
+
+    public String getTargetQualifiedName() {
+        return targetPackage == null || targetPackage.isEmpty()
+                ? node.getClassName() : targetPackage + "." + node.getClassName();
+    }
+
+    @Override
+    public String toString() {
+        return getSourceQualifiedName() + " -> " + getTargetQualifiedName() + " [" + moduleName + "/" + folderType + "]";
+    }
 }

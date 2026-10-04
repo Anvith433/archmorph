@@ -3,75 +3,33 @@ package com.anvith.archmorph.analysis.transformation.packaging;
 import com.anvith.archmorph.analysis.transformation.FolderType;
 import org.springframework.stereotype.Service;
 
+/**
+ * Plain package arithmetic for a business module:
+ * {@code <base>.<modulesPackage>.<module>.<folder>}. The full layout (shared code,
+ * application class) lives in {@code TargetArchitecture}.
+ */
 @Service
-public class DefaultPackagePlanner
-        implements PackagePlanner {
+public class DefaultPackagePlanner implements PackagePlanner {
 
-    /**
-     * Build the destination package.
-     *
-     * Example:
-     *
-     * Base Package:
-     *      com.demo
-     *
-     * Module:
-     *      user
-     *
-     * Folder:
-     *      service
-     *
-     * Result:
-     *
-     * com.demo.user.service
-     */
+    private static final String MODULES = "modules";
+
     @Override
-    public String plan(
-
-            String basePackage,
-
-            String moduleName,
-
-            FolderType folderType) {
-
-        if (basePackage == null) {
-            basePackage = "";
+    public String plan(String basePackage, String moduleName, FolderType folderType) {
+        String base = basePackage == null ? "" : basePackage;
+        String module = moduleName == null || moduleName.isBlank() ? "common" : moduleName.toLowerCase();
+        StringBuilder builder = new StringBuilder(base);
+        append(builder, MODULES);
+        append(builder, module);
+        if (folderType != null) {
+            append(builder, folderType.getFolderName());
         }
-
-        if (moduleName == null ||
-                moduleName.isBlank()) {
-
-            moduleName = "common";
-
-        }
-
-        if (folderType == null) {
-
-            return basePackage
-                    + "."
-                    + moduleName;
-
-        }
-
-        StringBuilder builder =
-                new StringBuilder();
-
-        builder.append(basePackage);
-
-        if (!basePackage.isBlank()) {
-            builder.append(".");
-        }
-
-        builder.append(moduleName.toLowerCase());
-
-        builder.append(".");
-
-        builder.append(
-                folderType.getFolderName()
-        );
-
         return builder.toString();
-
     }
 
+    private static void append(StringBuilder builder, String segment) {
+        if (!builder.isEmpty()) {
+            builder.append('.');
+        }
+        builder.append(segment);
+    }
 }

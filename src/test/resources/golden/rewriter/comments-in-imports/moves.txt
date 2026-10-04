@@ -1,0 +1,3 @@
+com.demo.entity.User = com.demo.modules.user.entity.User
+com.demo.service.UserService = com.demo.modules.user.service.UserService
+com.demo.service.AuditService = com.demo.shared.common.AuditService

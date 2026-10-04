@@ -1,0 +1,29 @@
+{
+  "description": "Generic helper classes: used by many modules (shared), by one module (joins it) or by none (shared with warning).",
+  "modules": [
+    "order",
+    "product",
+    "user"
+  ],
+  "moved": {
+    "com.demo.common.ApiResponse": "com.demo.shared.common.ApiResponse",
+    "com.demo.common.PageResult": "com.demo.shared.common.PageResult",
+    "com.demo.common.DateUtils": "com.demo.modules.order.common.DateUtils",
+    "com.demo.common.Unused": "com.demo.shared.common.Unused",
+    "com.demo.infrastructure.EmailClient": "com.demo.shared.infrastructure.EmailClient"
+  },
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "sharedClasses": [
+    "com.demo.common.ApiResponse",
+    "com.demo.common.PageResult",
+    "com.demo.common.Unused",
+    "com.demo.infrastructure.EmailClient"
+  ],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

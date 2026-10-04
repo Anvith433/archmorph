@@ -1,0 +1,168 @@
+package com.anvith.archmorph.analysis.validation.level;
+
+import com.anvith.archmorph.analysis.validation.BuildResult;
+import com.anvith.archmorph.analysis.validation.LevelResult;
+import com.anvith.archmorph.analysis.validation.ValidationContext;
+import com.anvith.archmorph.analysis.validation.ValidationIssue;
+import com.anvith.archmorph.analysis.validation.ValidationLevel;
+import com.anvith.archmorph.analysis.validation.ValidationStatus;
+import com.anvith.archmorph.analysis.validation.build.BuildPluginGuard;
+import com.anvith.archmorph.analysis.validation.build.SandboxedMavenRunner;
+import com.anvith.archmorph.common.config.ArchMorphProperties;
+import com.anvith.archmorph.workspace.WorkspaceManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+/**
+ * Level 7: Maven compile (or test) of the transformed project, in a sandboxed child process on a
+ * scratch <em>copy</em> of the project (the transformed workspace never receives {@code target/}).
+ * Never runs uploaded wrappers or scripts; see {@link SandboxedMavenRunner}.
+ */
+@Component
+public class BuildValidator {
+
+    private static final Logger log = LoggerFactory.getLogger(BuildValidator.class);
+
+    private static final Pattern COMPILER_ERROR =
+            Pattern.compile("\\[ERROR\\]\\s+(?<file>\\S.*?\\.java):\\[(?<line>\\d+),(?<col>\\d+)\\]\\s+(?<msg>.*)");
+
+    public record Outcome(LevelResult level, BuildResult build) {
+    }
+
+    private final ArchMorphProperties properties;
+    private final SandboxedMavenRunner runner;
+    private final BuildPluginGuard guard;
+
+    public BuildValidator(ArchMorphProperties properties, SandboxedMavenRunner runner, BuildPluginGuard guard) {
+        this.properties = properties;
+        this.runner = runner;
+        this.guard = guard;
+    }
+
+    public Outcome validate(ValidationContext context, Path mavenRepository) {
+        ArchMorphProperties.Build config = properties.getValidation().getBuild();
+        ValidationLevel level = ValidationLevel.BUILD;
+        if (!config.isEnabled()) {
+            return new Outcome(LevelResult.skipped(level, "Build validation is disabled in the configuration."), null);
+        }
+        if (!runner.mavenAvailable()) {
+            return new Outcome(LevelResult.skipped(level, "Maven was not found on this server."), null);
+        }
+
+        Path projectDir = context.scratch().resolve("project");
+        Path buildHome = context.scratch().resolve("home");
+        long started = System.nanoTime();
+        try {
+            copyForBuild(context.transformedRoot(), projectDir);
+            List<String> denied = guard.deniedPlugins(projectDir);
+            if (!denied.isEmpty() || guard.hasEscapingModule(projectDir)) {
+                return new Outcome(LevelResult.skipped(level, "The build was not run: the project declares build plugins that "
+                        + "execute arbitrary commands (" + String.join(", ", denied) + ") or modules outside the project."), null);
+            }
+
+            boolean hasTests = !context.original().structure().testSourceRoots().isEmpty();
+            var goal = switch (config.getMode()) {
+                case TEST -> SandboxedMavenRunner.Goal.TEST;
+                case COMPILE -> hasTests ? SandboxedMavenRunner.Goal.TEST_COMPILE : SandboxedMavenRunner.Goal.COMPILE;
+            };
+            Files.createDirectories(mavenRepository);
+            BuildResult build = runner.run(projectDir, buildHome, mavenRepository, goal);
+            return new Outcome(evaluate(build, started), build);
+        } catch (IOException | RuntimeException e) {
+            log.warn("Build validation could not run: {}", e.getClass().getSimpleName());
+            return new Outcome(LevelResult.skipped(level, "The build could not be started."), null);
+        } finally {
+            WorkspaceManager.deleteRecursively(context.scratch());
+        }
+    }
+
+    private LevelResult evaluate(BuildResult build, long startedNanos) {
+        long millis = (System.nanoTime() - startedNanos) / 1_000_000;
+        ValidationLevel level = ValidationLevel.BUILD;
+        if (build.timedOut()) {
+            return new LevelResult(level, ValidationStatus.FAIL,
+                    "The build exceeded the time limit and was stopped.", 1,
+                    List.of(ValidationIssue.error(null, 0, "Maven timed out after " + (build.durationMillis() / 1000) + " s.",
+                            "Increase archmorph.validation.build.timeout or check the project for long-running plugins.")), millis);
+        }
+        if (build.exitCode() == 0) {
+            return new LevelResult(level, ValidationStatus.PASS,
+                    String.join(" ", build.command()) + " succeeded in " + (build.durationMillis() / 1000.0) + " s", 0, List.of(), millis);
+        }
+
+        List<ValidationIssue> issues = new ArrayList<>();
+        String all = build.stdout() + "\n" + build.stderr();
+        Matcher matcher = COMPILER_ERROR.matcher(all);
+        while (matcher.find() && issues.size() < 50) {
+            String file = matcher.group("file").replace("<project>/", "");
+            String message = matcher.group("msg").trim();
+            issues.add(ValidationIssue.error(file, Integer.parseInt(matcher.group("line")), message, probableCause(message)));
+        }
+        if (issues.isEmpty()) {
+            boolean resolution = all.contains("Could not resolve") || all.contains("Non-resolvable")
+                    || all.contains("offline mode") || all.contains("Failed to read artifact descriptor")
+                    || all.contains("Could not transfer") || all.contains("Plugin ") && all.contains("could not be resolved");
+            if (resolution) {
+                return new LevelResult(level, ValidationStatus.SKIPPED,
+                        "Maven could not resolve dependencies or plugins in the sandbox; the compile result is unknown.", 0,
+                        List.of(), millis);
+            }
+            String first = all.lines().filter(l -> l.contains("[ERROR]")).findFirst().orElse("Maven reported a failure.").trim();
+            issues.add(ValidationIssue.error(null, 0, truncate(first), "See the captured build output."));
+        }
+        return LevelResult.of(level, issues, "build succeeded", millis);
+    }
+
+    static String probableCause(String message) {
+        String m = message.toLowerCase();
+        if (m.contains("package") && m.contains("does not exist")) {
+            return "An import or qualified name points to a package that no longer exists after the move.";
+        }
+        if (m.contains("cannot find symbol")) {
+            return "A reference was not updated, or a package-private member is no longer visible after the move.";
+        }
+        if (m.contains("is not public") || m.contains("cannot be accessed from outside package")) {
+            return "Package-private access across packages after the move; make the member public or keep the classes together.";
+        }
+        if (m.contains("already defined") || m.contains("duplicate class")) {
+            return "Two classes ended up with the same qualified name.";
+        }
+        return "Compare with the original project: if it fails to compile in the same way, the cause is not the transformation.";
+    }
+
+    /** Copies the project without wrapper scripts and {@code .mvn/} (they can inject JVM options and extensions). */
+    private void copyForBuild(Path source, Path target) throws IOException {
+        try (Stream<Path> stream = Files.walk(source)) {
+            for (Path file : (Iterable<Path>) stream::iterator) {
+                Path relative = source.relativize(file);
+                String normalized = relative.toString().replace('\\', '/');
+                if (normalized.isEmpty() || normalized.equals(".mvn") || normalized.startsWith(".mvn/")
+                        || normalized.endsWith("mvnw") || normalized.endsWith("mvnw.cmd")
+                        || Files.isSymbolicLink(file)) {
+                    continue;
+                }
+                Path destination = target.resolve(relative.toString());
+                if (Files.isDirectory(file)) {
+                    Files.createDirectories(destination);
+                } else {
+                    Files.createDirectories(destination.getParent());
+                    Files.copy(file, destination);
+                }
+            }
+        }
+    }
+
+    private static String truncate(String text) {
+        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
+    }
+}

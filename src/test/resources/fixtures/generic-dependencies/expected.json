@@ -1,0 +1,78 @@
+{
+  "description": "Dependencies hidden in generics, return types, parameters, object creation, calls and inheritance.",
+  "modules": [
+    "customer",
+    "order",
+    "product"
+  ],
+  "edges": [
+    [
+      "com.demo.service.ProductService",
+      "com.demo.entity.Product",
+      "GENERIC"
+    ],
+    [
+      "com.demo.service.ProductService",
+      "com.demo.entity.Order",
+      "GENERIC"
+    ],
+    [
+      "com.demo.service.ProductService",
+      "com.demo.entity.Customer",
+      "GENERIC"
+    ],
+    [
+      "com.demo.service.ProductService",
+      "com.demo.common.Page",
+      "METHOD_RETURN"
+    ],
+    [
+      "com.demo.repository.ProductRepository",
+      "com.demo.repository.BaseRepository",
+      "INHERITANCE"
+    ],
+    [
+      "com.demo.repository.ProductRepository",
+      "com.demo.entity.Product",
+      "GENERIC"
+    ],
+    [
+      "com.demo.service.OrderService",
+      "com.demo.repository.ProductRepository",
+      "METHOD_INVOCATION"
+    ],
+    [
+      "com.demo.service.OrderService",
+      "com.demo.entity.Order",
+      "OBJECT_CREATION"
+    ],
+    [
+      "com.demo.service.OrderService",
+      "com.demo.entity.Product",
+      "METHOD_PARAMETER"
+    ],
+    [
+      "com.demo.entity.Order",
+      "com.demo.entity.Customer",
+      "ENTITY_RELATIONSHIP"
+    ],
+    [
+      "com.demo.entity.Order",
+      "com.demo.entity.Product",
+      "ENTITY_RELATIONSHIP"
+    ],
+    [
+      "com.demo.service.CustomerService",
+      "com.demo.service.Auditable",
+      "IMPLEMENTATION"
+    ]
+  ],
+  "kept": [
+    "com.demo.App"
+  ],
+  "manualReview": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

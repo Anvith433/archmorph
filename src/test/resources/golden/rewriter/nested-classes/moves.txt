@@ -1,0 +1,2 @@
+com.demo.service.OrderService = com.demo.modules.order.service.OrderService
+com.demo.web.OrderController = com.demo.modules.order.controller.OrderController

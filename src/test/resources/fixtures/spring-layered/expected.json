@@ -1,0 +1,45 @@
+{
+  "description": "Canonical layered Spring Boot project: user, order, payment domains plus shared code.",
+  "modules": [
+    "order",
+    "payment",
+    "user"
+  ],
+  "moved": {
+    "com.demo.controller.UserController": "com.demo.modules.user.controller.UserController",
+    "com.demo.service.UserService": "com.demo.modules.user.service.UserService",
+    "com.demo.repository.UserRepository": "com.demo.modules.user.repository.UserRepository",
+    "com.demo.entity.User": "com.demo.modules.user.entity.User",
+    "com.demo.dto.UserDto": "com.demo.modules.user.dto.UserDto",
+    "com.demo.exception.UserNotFoundException": "com.demo.modules.user.exception.UserNotFoundException",
+    "com.demo.service.OrderService": "com.demo.modules.order.service.OrderService",
+    "com.demo.entity.Order": "com.demo.modules.order.entity.Order",
+    "com.demo.service.PaymentService": "com.demo.modules.payment.service.PaymentService",
+    "com.demo.common.ApiResponse": "com.demo.shared.common.ApiResponse",
+    "com.demo.common.AppConstants": "com.demo.shared.common.AppConstants",
+    "com.demo.config.SecurityConfig": "com.demo.shared.security.SecurityConfig",
+    "com.demo.exception.GlobalExceptionHandler": "com.demo.shared.exception.GlobalExceptionHandler"
+  },
+  "movedTests": {
+    "com.demo.service.UserServiceTest": "com.demo.modules.user.service.UserServiceTest"
+  },
+  "kept": [
+    "com.demo.DemoApplication",
+    "com.demo.ArchitectureTest"
+  ],
+  "manualReview": [],
+  "sharedClasses": [
+    "com.demo.common.ApiResponse",
+    "com.demo.common.AppConstants",
+    "com.demo.exception.GlobalExceptionHandler",
+    "com.demo.config.SecurityConfig"
+  ],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "minViolations": 0,
+  "compiles": true,
+  "resourceFindings": [
+    "src/main/resources/application.properties"
+  ]
+}

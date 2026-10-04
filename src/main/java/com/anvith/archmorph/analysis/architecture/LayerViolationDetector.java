@@ -1,69 +1,39 @@
 package com.anvith.archmorph.analysis.architecture;
 
+import com.anvith.archmorph.analysis.architecture.rules.LayerRule;
 import com.anvith.archmorph.analysis.architecture.rules.LayerRuleRegistry;
 import com.anvith.archmorph.analysis.dependency.DependencyEdge;
 import com.anvith.archmorph.analysis.dependency.DependencyGraph;
-import com.anvith.archmorph.analysis.dependency.DependencyNode;
-import com.anvith.archmorph.parser.ComponentType;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.Optional;
+
+/** Detects dependencies that break the configured layer rules. */
 @Service
-@RequiredArgsConstructor
 public class LayerViolationDetector {
 
-    /*
-     * Rule Registry
-     */
     private final LayerRuleRegistry layerRuleRegistry;
 
-    /**
-     * Detect architecture layer violations.
-     */
-    public void detect(
-            DependencyGraph dependencyGraph,
-            ArchitectureReport report) {
-
-        for (DependencyEdge edge : dependencyGraph.getEdges()) {
-
-            DependencyNode source = edge.getSource();
-            DependencyNode target = edge.getTarget();
-
-            ComponentType sourceType = source.getComponentType();
-            ComponentType targetType = target.getComponentType();
-
-            if (sourceType == null || targetType == null) {
-                continue;
-            }
-
-            /*
-             * Ask the Rule Engine whether
-             * this dependency is allowed.
-             */
-            boolean allowed =
-                    layerRuleRegistry.isAllowed(
-                            sourceType,
-                            targetType
-                    );
-
-            if (!allowed) {
-
-                report.getViolations().add(
-
-                        String.format(
-                                "%s '%s' must not depend on %s '%s'",
-                                sourceType,
-                                source.getClassName(),
-                                targetType,
-                                target.getClassName()
-                        )
-
-                );
-
-            }
-
-        }
-
+    public LayerViolationDetector(LayerRuleRegistry layerRuleRegistry) {
+        this.layerRuleRegistry = layerRuleRegistry;
     }
 
+    public void detect(DependencyGraph dependencyGraph, ArchitectureReport report) {
+        for (DependencyEdge edge : dependencyGraph.getEdges()) {
+            if (edge.getSource().getComponentType() == null || edge.getTarget().getComponentType() == null) {
+                continue;
+            }
+            Optional<LayerRule> rule = layerRuleRegistry.findRule(
+                    edge.getSource().getComponentType(), edge.getTarget().getComponentType());
+            if (rule.isPresent() && !rule.get().isAllowed()) {
+                report.getLayerViolations().add(new LayerViolation(
+                        edge.getSource().getQualifiedName(), edge.getSource().getClassName(),
+                        edge.getSource().getComponentType(),
+                        edge.getTarget().getQualifiedName(), edge.getTarget().getClassName(),
+                        edge.getTarget().getComponentType(),
+                        edge.getDependencyType(), edge.getLocation(),
+                        rule.get().getSeverity(), rule.get().getRationale()));
+            }
+        }
+    }
 }

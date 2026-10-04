@@ -1,0 +1,3 @@
+com.demo.service.UserService = com.demo.modules.user.service.UserService
+com.demo.service.OrderService = com.demo.modules.order.service.OrderService
+com.demo.entity.Order = com.demo.modules.order.entity.Order
