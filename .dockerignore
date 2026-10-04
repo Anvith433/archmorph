@@ -1,0 +1,13 @@
+# Only what the Dockerfile copies: pom.xml, src/, frontend/ (sources)
+.git
+.github
+target
+workspace
+bin
+docs
+**/node_modules
+frontend/dist
+frontend/*.tsbuildinfo
+*.md
+.idea
+.vscode

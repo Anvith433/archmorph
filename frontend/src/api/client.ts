@@ -2,6 +2,7 @@ import type {
   Analysis,
   ArchitectureView,
   CreatedProject,
+  Decisions,
   Diff,
   DryRun,
   Envelope,
@@ -11,6 +12,7 @@ import type {
   Modules,
   Plan,
   Project,
+  TargetStrategy,
   Validation,
 } from './types';
 
@@ -68,7 +70,10 @@ async function parse<T>(response: Response): Promise<T> {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, { ...init, headers: { Accept: 'application/json', ...(init?.headers ?? {}) } });
+    response = await fetch(url, {
+      ...init,
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(init?.headers ?? {}) },
+    });
   } catch {
     throw new ApiError('The ArchMorph server could not be reached.', 'NETWORK_ERROR', 0,
       'Check that the backend is running (default http://localhost:8080) and try again.');
@@ -92,6 +97,9 @@ export function uploadProject(file: File, onProgress: (fraction: number) => void
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/projects`);
     xhr.responseType = 'json';
+    // Marks the request as coming from this UI; with authentication enabled the server refuses state-changing
+    // requests without it (a cross-site form cannot set custom headers).
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(event.loaded / event.total);
@@ -128,7 +136,13 @@ export const api = {
   architecture: (id: string) => request<ArchitectureView>(projectPath(id, '/architecture')),
   modules: (id: string) => request<Modules>(projectPath(id, '/modules')),
   updateModules: (id: string, edits: ModuleEdit[]) => request<Modules>(projectPath(id, '/modules'), json('PUT', { edits })),
+  decisions: (id: string) => request<Decisions>(projectPath(id, '/decisions')),
+  applyDecisions: (id: string, decisions: Decisions) => request<Decisions>(projectPath(id, '/decisions'), json('PUT', decisions)),
   plan: (id: string) => request<Plan>(projectPath(id, '/plan')),
+  previewPlan: (id: string, strategy: TargetStrategy) =>
+    request<Plan>(projectPath(id, `/plan?strategy=${strategy === 'MODULAR_BY_DOMAIN' ? 'MODULAR_BY_DOMAIN' : 'MODULAR_MONOLITH'}`)),
+  changeStrategy: (id: string, strategy: TargetStrategy, addModulithVerification?: boolean) =>
+    request<Plan>(projectPath(id, '/strategy'), json('PUT', { strategy, addModulithVerification })),
   dryRun: (id: string) => request<DryRun>(projectPath(id, '/transform?dryRun=true'), json('POST')),
   transform: (id: string) => request<CreatedProject>(projectPath(id, '/transform'), json('POST')),
   revalidate: (id: string) => request<CreatedProject>(projectPath(id, '/validate'), json('POST')),

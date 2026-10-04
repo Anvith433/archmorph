@@ -6,15 +6,17 @@ place and what remains.
 
 ## Scope and assumptions
 
-* **Deployment model:** a single instance in *local mode* — one developer or a trusted team on a workstation
-  or internal network. There is no login. Anyone who can reach the server can upload projects and, knowing a
-  project UUID, read that project.
+* **Deployment model:** a single instance. By default in *local mode* — one developer on a workstation, no
+  login: anyone who can reach the server can upload projects and, knowing a project UUID, read that project
+  (the server warns at startup when it listens beyond loopback without login). Optionally with *HTTP Basic
+  login* for a trusted team: projects are bound to the uploading user. See [DEPLOYMENT.md](DEPLOYMENT.md).
 * **Assets:** the host (files, credentials, network position), other users' uploaded source code, service
   availability.
 * **Trust boundaries:** HTTP clients → API; uploaded archive → extractor; uploaded source → parser and
   rewriter; uploaded build definition → Maven child process; API → browser (rendering server data).
-* **Out of scope:** multi-tenant hosting on the public internet. That requires authentication, per-user
-  authorisation and a real sandbox (container / VM per build) — see [Hardening for shared deployments](#hardening-for-shared-deployments).
+* **Out of scope:** multi-tenant hosting on the public internet. Login and per-user projects exist, but the
+  build of one user's upload runs in the same container as everyone else's; that needs a sandbox per build
+  (container / VM) — see [Hardening for shared deployments](#hardening-for-shared-deployments).
 
 ## Threats, mitigations, residual risk
 
@@ -44,15 +46,16 @@ place and what remains.
 
 | Threat | Vector | Mitigation | Residual risk |
 |---|---|---|---|
-| Running uploaded scripts | `mvnw`, `.mvn/`, shell scripts, Git hooks | never executed. Analysis is pure parsing. The build runs on a *copy* without `.mvn/` and `mvnw*`, using the server's own `mvn` | — |
+| Running uploaded scripts | `mvnw`, `.mvn/`, `gradlew`, `gradle/wrapper`, shell scripts, Git hooks | never executed. Analysis is pure parsing; Gradle settings and build scripts are read as text (string literals only), never evaluated. The build runs on a *copy* without `.mvn/`, `mvnw*`, `gradlew*`, `gradle/wrapper/` and `.gradle/`, using the server's own `mvn` / `gradle` | — |
+| Gradle build scripts | `build.gradle(.kts)`, `settings.gradle(.kts)`, `buildSrc`, init scripts | Gradle builds are **disabled by default** (`gradle-enabled=false`) because evaluating a build script runs arbitrary code; when enabled: `--no-daemon`, a dedicated `GRADLE_USER_HOME` (no user init scripts, properties or credentials), cleared environment, same timeout and limits as Maven | when enabled, the build script runs with the server user's privileges; `BuildPluginGuard` does not apply to Gradle |
 | Command-runner plugins | `exec-maven-plugin`, `maven-antrun-plugin`, Groovy, frontend/node, docker, jib, deploy/release/SCM/wagon plugins | `BuildPluginGuard` refuses the build if any `pom.xml` declares one | other plugins and **annotation processors** declared by the project still run arbitrary code during compilation |
 | Credential theft by the build | build reads env vars, `~/.m2/settings.xml`, cloud credentials | environment cleared: only `PATH`, `JAVA_HOME`, `HOME` (an isolated per-project directory), `MAVEN_OPTS`, `LANG` and explicitly configured pass-through variables; separate `maven.repo.local` | the build runs as the server's OS user and can read any file that user can read |
-| Resource exhaustion by the build | infinite loop, fork bomb, huge output | wall-clock timeout (4 min) with process-tree kill; `prlimit` CPU-time and file-size limits when available; output capped and absolute paths masked | memory and process count are not limited without a container |
+| Resource exhaustion by the build | infinite loop, fork bomb, huge output | wall-clock timeout (4 min) with process-tree kill; `prlimit` CPU-time and file-size limits when available; output capped and absolute paths masked; the shipped `docker-compose.yml` adds memory, PID and CPU limits, a read-only root file system, no capabilities and `no-new-privileges` | without the container, memory and process count are not limited |
 | Network abuse by the build | `<repositories>` pointing at attacker hosts, exfiltration from a plugin | optional `offline=true`; the build only downloads through Maven | without offline mode or egress filtering the build has network access |
 | Code execution in the parser | malicious source triggering parser bugs | JavaParser parses only (no class loading, no annotation processing); per-file size cap (2 MB); analysis deadline | parser denial-of-service bugs bounded by the analysis timeout |
 
 **Build validation is process-level isolation, not a security boundary.** Compiling a Maven project runs the
-project's plugins and annotation processors. To analyse projects you do not trust, either run ArchMorph in a
+project's plugins and annotation processors; a Gradle build (opt-in) runs its build scripts. To analyse projects you do not trust, either run ArchMorph in a
 disposable container/VM with no credentials and restricted egress, or disable the build level:
 `archmorph.validation.build.enabled=false` (levels 1–6 still run; they never execute uploaded code).
 
@@ -64,7 +67,8 @@ disposable container/VM with no credentials and restricted egress, or disable th
 | XSS from uploaded content | class names, comments, string literals with HTML/JS shown in the UI | React text rendering only (no `dangerouslySetInnerHTML`); diffs rendered as text nodes; strict CSP `default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'` | — |
 | Malicious downloads | serving uploaded content as HTML | downloads are `application/zip` / `application/json` / `text/markdown` with `Content-Disposition: attachment` and `nosniff` | users must still treat the transformed project as untrusted code |
 | Clickjacking, MIME sniffing, referrer leaks | — | `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, restrictive `Permissions-Policy` | — |
-| Cross-origin abuse | another site calling the API from a browser | CORS allowlist from configuration (default `http://localhost:5173`, never `*`); no cookies or sessions, so no ambient credentials and no CSRF surface | a non-browser client can call the API directly (no auth) |
+| Cross-origin abuse | another site calling the API from a browser | CORS allowlist from configuration (default `http://localhost:5173`, never `*`); no cookies or sessions. With login, browsers resend Basic credentials on their own, so state-changing requests must carry `X-Requested-With` (a cross-site form cannot set it; a cross-site script is stopped by the CORS preflight) | local mode: a non-browser client can call the API directly |
+| Unauthorised access (login enabled) | guessing passwords, reading other users' projects | HTTP Basic over TLS (reverse proxy); passwords only as bcrypt hashes (the server refuses to start with plain text or `{noop}`); successful logins remembered 5 min under an HMAC with a random per-process key, failures never cached; 10 failures per user name and address (50 per address) in 5 min lock further attempts for the window; projects of other users answer 404; rate limits and job quotas per user | no MFA, no logout, no password rotation without restart; credentials must be protected by TLS |
 | Denial of service | many uploads / transforms / downloads | per-client fixed-window rate limits (uploads 10/min, expensive operations 30/min, downloads 60/min, other 600/min); bounded job queue (20) and workers (2); max 3 active jobs per client; analysis and build timeouts | in-memory, per-instance limits; client identity is the (hashed) remote address, so clients behind one NAT share a budget |
 | Client spoofing | forged `X-Forwarded-For` to dodge rate limits | forwarded headers ignored unless `trust-forwarded-headers=true` (only behind a trusted proxy) | — |
 | Request tracing | correlating errors without leaking data | server-generated request ID in `X-Request-Id`, the response envelope and the log MDC; client-provided IDs are ignored | — |
@@ -74,14 +78,16 @@ disposable container/VM with no credentials and restricted egress, or disable th
 * Uploaded source code, file contents, secrets, tokens and environment variables are never logged. Logs
   contain project IDs, phase events, counts and durations.
 * Remote addresses are hashed (SHA-256) before being used as rate-limit keys.
-* No credentials are configured or required by ArchMorph itself.
+* ArchMorph itself needs no credentials. Login passwords are configured only as bcrypt hashes and never
+  logged; startup errors about users name the user index, never the value.
 
 ## Hardening for shared deployments
 
 Before exposing ArchMorph beyond a trusted network:
 
-1. Add authentication (Spring Security is already in place; `ProjectAccessPolicy` is the single
-   authorisation seam) and bind projects to their owner.
+1. Enable login (`archmorph.security.auth.mode=BASIC`; projects are then bound to their owner) and run the
+   hardened container from `docker-compose.yml`. For single sign-on, replace the Basic setup in
+   `WebSecurityConfiguration`; `ProjectAccessPolicy` stays the single authorisation seam.
 2. Run each build in its own container or VM (no host mounts, no credentials, CPU/memory/PID limits,
    egress allowlist to your Maven mirror) — or disable build validation.
 3. Put a reverse proxy in front for TLS, global rate limiting and request-size limits; then enable

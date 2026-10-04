@@ -48,10 +48,20 @@ class CliRunnerTest {
 
         String text = console.toString(StandardCharsets.UTF_8);
         assertThat(exit).as(text).isZero();
-        assertThat(text).contains("Candidate modules", "Plan:", "Validation:");
+        assertThat(text).contains("Candidate modules", "Plan (MODULAR_MONOLITH)", "Validation:");
         try (ZipFile result = new ZipFile(output.toFile())) {
+            assertThat(result.getEntry("src/main/java/com/demo/user/UserService.java")).isNotNull();
+            assertThat(result.getEntry("src/main/java/com/demo/user/controller/UserController.java")).isNotNull();
+            assertThat(result.getEntry("MODULES.md")).isNotNull();
+        }
+
+        Path byDomain = temp.resolve("by-domain.zip");
+        assertThat(cli.execute(new String[]{"transform", zip.toString(), "--output", byDomain.toString(),
+                "--strategy", "modular-by-domain", "--no-build"})).isZero();
+        try (ZipFile result = new ZipFile(byDomain.toFile())) {
             assertThat(result.getEntry("src/main/java/com/demo/modules/user/service/UserService.java")).isNotNull();
         }
+        assertThat(cli.execute(new String[]{"plan", zip.toString(), "--strategy", "microservices"})).isEqualTo(2);
         assertThat(temp.resolve("reports/transformation-plan.json")).exists();
         assertThat(temp.resolve("reports/validation-report.md")).exists();
         assertThat(zip).as("input archive untouched").exists();
@@ -65,5 +75,48 @@ class CliRunnerTest {
         assertThat(cli.execute(new String[]{"explode", "x.zip"})).isEqualTo(2);
         assertThat(CliRunner.isCliInvocation(new String[]{"analyze", "x.zip"})).isTrue();
         assertThat(CliRunner.isCliInvocation(new String[]{"--server.port=9000"})).isFalse();
+    }
+
+    @Test
+    void savedReviewDecisionsAreReplayed() throws Exception {
+        Path zip = Files.write(temp.resolve("shop.zip"), ApiClient.zipFixture("spring-layered"));
+        Path decisions = Files.writeString(temp.resolve("decisions.json"), """
+                {"version": 1, "strategy": "MODULAR_MONOLITH", "addModulithVerification": false,
+                 "edits": [{"type": "RENAME_MODULE", "module": "user", "newName": "customer"},
+                           {"type": "EXPOSE_CLASS", "className": "com.demo.repository.UserRepository"}]}
+                """);
+        Path output = temp.resolve("out.zip");
+        ByteArrayOutputStream console = new ByteArrayOutputStream();
+        CliRunner cli = new CliRunner(workflow, workspaceManager, reports, properties, console);
+
+        int exit = cli.execute(new String[]{"transform", zip.toString(), "--output", output.toString(), "--no-build",
+                "--decisions", decisions.toString()});
+
+        String text = console.toString(StandardCharsets.UTF_8);
+        assertThat(exit).as(text).isZero();
+        assertThat(text).contains("Applied 2 review decision(s).", "customer");
+        try (ZipFile result = new ZipFile(output.toFile())) {
+            assertThat(result.getEntry("src/main/java/com/demo/customer/UserRepository.java")).isNotNull();
+        }
+
+        Path broken = Files.writeString(temp.resolve("broken.json"), "{\"version\": 99, \"edits\": []}");
+        assertThat(cli.execute(new String[]{"plan", zip.toString(), "--decisions", broken.toString()})).isEqualTo(2);
+    }
+
+    @Test
+    void hashPasswordPrintsABcryptHashAndNeverThePassword() {
+        ByteArrayOutputStream console = new ByteArrayOutputStream();
+        CliRunner cli = new CliRunner(workflow, workspaceManager, reports, properties, console,
+                new java.io.ByteArrayInputStream("a-long-enough-password\n".getBytes()));
+
+        assertThat(cli.execute(new String[]{"hash-password"})).isZero();
+        String printed = console.toString().trim();
+        assertThat(printed).startsWith("{bcrypt}$2").doesNotContain("a-long-enough-password");
+        assertThat(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+                .matches("a-long-enough-password", printed.substring("{bcrypt}".length()))).isTrue();
+
+        CliRunner shortPassword = new CliRunner(workflow, workspaceManager, reports, properties, new ByteArrayOutputStream(),
+                new java.io.ByteArrayInputStream("short\n".getBytes()));
+        assertThat(shortPassword.execute(new String[]{"hash-password"})).isEqualTo(2);
     }
 }

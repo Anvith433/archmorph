@@ -35,6 +35,24 @@ public class TransformationPlan {
 
     private String basePackage = "";
 
+    /** Add Spring Modulith's boundary verification (dependency + test) to the transformed project. */
+    private boolean modulithVerification;
+
+    /** Project-relative files the transformation generates in addition to the planned entries. */
+    private final List<String> generatedFiles = new ArrayList<>();
+
+    public boolean isModulithVerification() {
+        return modulithVerification;
+    }
+
+    public void setModulithVerification(boolean modulithVerification) {
+        this.modulithVerification = modulithVerification;
+    }
+
+    public List<String> getGeneratedFiles() {
+        return generatedFiles;
+    }
+
     public void addEntry(TransformationPlanEntry entry) {
         entries.add(entry);
     }

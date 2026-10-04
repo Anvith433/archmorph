@@ -3,9 +3,11 @@ package com.anvith.archmorph.cli;
 import com.anvith.archmorph.analysis.transformation.SafetyLevel;
 import com.anvith.archmorph.analysis.transformation.planner.TransformationPlan;
 import com.anvith.archmorph.analysis.transformation.planner.TransformationPlanEntry;
+import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
 import com.anvith.archmorph.analysis.validation.LevelResult;
 import com.anvith.archmorph.analysis.validation.ValidationReport;
 import com.anvith.archmorph.analysis.validation.ValidationStatus;
+import com.anvith.archmorph.api.dto.ModuleDtos;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
 import com.anvith.archmorph.common.exception.ArchMorphException;
 import com.anvith.archmorph.common.util.FilenameSanitizer;
@@ -25,6 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -40,6 +43,9 @@ import java.util.Optional;
  * archmorph analyze   project.zip [--report-dir DIR]
  * archmorph plan      project.zip [--report-dir DIR]
  * archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
+ * archmorph hash-password            (reads a password, prints a bcrypt hash for archmorph.security.auth.users)
+ *
+ * options: --strategy modular-monolith (default) | modular-by-domain, --add-modulith-test, --decisions file.json
  * </pre>
  * Exit codes: 0 success, 1 failure, 2 usage error, 3 transformed but validation failed.
  */
@@ -52,16 +58,23 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
     private final ReportService reports;
     private final ArchMorphProperties properties;
     private final PrintStream out;
+    private final InputStream in;
     private int exitCode;
 
     @Autowired
     public CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
                      ArchMorphProperties properties) {
-        this(workflow, workspaceManager, reports, properties, System.out);
+        this(workflow, workspaceManager, reports, properties, System.out, System.in);
     }
 
     CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
               ArchMorphProperties properties, OutputStream out) {
+        this(workflow, workspaceManager, reports, properties, out, InputStream.nullInputStream());
+    }
+
+    CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
+              ArchMorphProperties properties, OutputStream out, InputStream in) {
+        this.in = in;
         this.workflow = workflow;
         this.workspaceManager = workspaceManager;
         this.reports = reports;
@@ -86,14 +99,29 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
             return args.length == 0 ? 2 : 0;
         }
         String command = args[0];
+        if (command.equals("hash-password")) {
+            return hashPassword();
+        }
         Path zip = null;
         Path output = null;
         Path reportDir = null;
+        TargetStrategy strategy = null;
+        Boolean modulith = null;
+        Path decisions = null;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--output" -> output = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--report-dir" -> reportDir = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--no-build" -> properties.getValidation().getBuild().setEnabled(false);
+                case "--add-modulith-test" -> modulith = true;
+                case "--decisions" -> decisions = i + 1 < args.length ? Path.of(args[++i]) : null;
+                case "--strategy" -> {
+                    strategy = i + 1 < args.length ? parseStrategy(args[++i]) : null;
+                    if (strategy == null) {
+                        out.println("Unknown strategy. Use modular-monolith or modular-by-domain.");
+                        return 2;
+                    }
+                }
                 default -> {
                     if (args[i].startsWith("--")) {
                         out.println("Unknown option: " + args[i]);
@@ -116,10 +144,24 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
             out.println("File not found: " + zip.getFileName());
             return 2;
         }
+        ModuleDtos.DecisionsDto review = null;
+        if (decisions != null) {
+            try {
+                review = tools.jackson.databind.json.JsonMapper.builder().build()
+                        .readValue(decisions.toFile(), ModuleDtos.DecisionsDto.class);
+            } catch (RuntimeException e) {
+                out.println("The decisions file could not be read: " + decisions.getFileName());
+                return 2;
+            }
+            if (review.version() != ModuleDtos.DecisionsDto.CURRENT_VERSION || review.edits() == null) {
+                out.println("Unsupported decisions file: " + decisions.getFileName());
+                return 2;
+            }
+        }
 
         ProjectWorkspace workspace = workspaceManager.create();
         try {
-            return run(command, zip, output, reportDir, workspace);
+            return run(command, zip, output, reportDir, strategy, modulith, review, workspace);
         } catch (ArchMorphException e) {
             out.println("Failed: " + e.getMessage());
             if (e.getHint() != null) {
@@ -134,14 +176,33 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         }
     }
 
-    private int run(String command, Path zip, Path output, Path reportDir, ProjectWorkspace workspace) throws IOException {
+    static TargetStrategy parseStrategy(String value) {
+        String normalised = value.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+        for (TargetStrategy strategy : TargetStrategy.values()) {
+            if (strategy.name().equals(normalised)) {
+                return strategy;
+            }
+        }
+        return null;
+    }
+
+    private int run(String command, Path zip, Path output, Path reportDir, TargetStrategy strategy, Boolean modulith,
+                    ModuleDtos.DecisionsDto review, ProjectWorkspace workspace) throws IOException {
         Files.copy(zip, workspace.archive(), StandardCopyOption.REPLACE_EXISTING);
         ProjectSession session = new ProjectSession(workspace, FilenameSanitizer.displayName(zip.getFileName().toString()),
                 "cli", Files.size(zip));
+        session.setStrategy(strategy);
+        session.setModulithVerification(modulith);
         ProgressListener progress = (event, detail) -> out.println("  [" + event + "] " + detail);
 
         out.println("Analysing " + session.displayName() + " ...");
         workflow.analyze(session, progress);
+        if (review != null) {
+            TargetStrategy reviewed = review.strategy() == null || strategy != null ? strategy : parseStrategy(review.strategy());
+            workflow.applyDecisions(session, reviewed, modulith != null ? modulith : review.addModulithVerification(),
+                    review.edits().stream().map(ModuleDtos::toEdit).toList());
+            out.println("Applied " + review.edits().size() + " review decision(s).");
+        }
         printAnalysis(session);
 
         int code = 0;
@@ -178,11 +239,20 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         out.println("Candidate modules (static-analysis indicators):");
         session.finalModules().getModules().forEach(m -> out.printf("  %-14s %-16s classes=%-3d confidence=%.2f cohesion=%.2f coupling=%.2f%n",
                 m.getModuleName(), m.getCategory(), m.getClassCount(), m.getConfidence(), m.getCohesion(), m.getExternalCoupling()));
+        var boundaries = workflow.boundaries(session);
+        if (!boundaries.acyclic()) {
+            out.println();
+            out.println("Module cycles: " + String.join("; ", boundaries.cycles().stream().map(c -> String.join(" <-> ", c)).toList()));
+            for (var suggestion : boundaries.suggestions()) {
+                out.printf("  [%s] %s (%s -> %s, %d dependencies)%n", suggestion.kind(), suggestion.title(),
+                        suggestion.from(), suggestion.to(), suggestion.dependencyCount());
+            }
+        }
     }
 
     private void printPlan(TransformationPlan plan) {
         out.println();
-        out.println("Plan: " + plan.movedCount() + " file(s) to move, " + plan.getConflicts().size() + " conflict(s)");
+        out.println("Plan (" + plan.getStrategy() + "): " + plan.movedCount() + " file(s) to move, " + plan.getConflicts().size() + " conflict(s)");
         for (TransformationPlanEntry e : plan.getEntries()) {
             if (e.getSafety() != SafetyLevel.SAFE || e.isMoved()) {
                 out.printf("  %-18s %s -> %s  [%s]%n", e.getSafety(), e.getSourcePackage(), e.getTargetPackage(), e.getSourceFile().getFileName());
@@ -210,6 +280,10 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         out.println("Reports written to " + reportDir.getFileName());
     }
 
+    private int hashPassword() {
+        return PasswordHashCommand.run(in, out);
+    }
+
     private void usage() {
         out.println("""
                 ArchMorph - static-analysis driven migration of layered Java applications to modular monoliths
@@ -218,12 +292,19 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
                   archmorph analyze   <project.zip> [--report-dir DIR]
                   archmorph plan      <project.zip> [--report-dir DIR]
                   archmorph transform <project.zip> --output <transformed.zip> [--report-dir DIR] [--no-build]
+                  archmorph hash-password       read a password, print a bcrypt hash for authentication
+
+                Options:
+                  --strategy modular-monolith   module root = public API, sub-packages internal (default)
+                  --strategy modular-by-domain  <base>.modules.<module>.<layer>, no API separation
+                  --add-modulith-test           add Spring Modulith's test dependency and a ModularityTests class
+                  --decisions <file.json>       apply review decisions exported from the UI (GET /decisions)
 
                 The original archive is never modified. See docs/API.md and README.md.""");
     }
 
     /** True when the arguments select CLI mode. */
     public static boolean isCliInvocation(String[] args) {
-        return args.length > 0 && List.of("analyze", "plan", "transform", "help").contains(args[0]);
+        return args.length > 0 && List.of("analyze", "plan", "transform", "hash-password", "help").contains(args[0]);
     }
 }

@@ -54,6 +54,7 @@ public class ComponentClassifier {
             "ControllerAdvice", ComponentType.EXCEPTION_HANDLER,
             "RestController", ComponentType.CONTROLLER,
             "Controller", ComponentType.CONTROLLER,
+            "DgsComponent", ComponentType.CONTROLLER,
             "Service", ComponentType.SERVICE,
             "Repository", ComponentType.REPOSITORY,
             "Entity", ComponentType.ENTITY,
@@ -62,6 +63,11 @@ public class ComponentClassifier {
             "Document", ComponentType.ENTITY,
             "Configuration", ComponentType.CONFIGURATION,
             "ConfigurationProperties", ComponentType.CONFIGURATION);
+
+    /** Spring for GraphQL and Netflix DGS handler methods: the GraphQL equivalent of request mappings. */
+    private static final Set<String> GRAPHQL_HANDLER_ANNOTATIONS = Set.of(
+            "QueryMapping", "MutationMapping", "SubscriptionMapping", "SchemaMapping", "BatchMapping",
+            "DgsQuery", "DgsMutation", "DgsSubscription", "DgsData");
 
     private static final Map<String, ComponentType> SUPERTYPE_RULES = orderedMap(
             "OncePerRequestFilter", ComponentType.FILTER,
@@ -82,6 +88,9 @@ public class ComponentClassifier {
             "AuthenticationSuccessHandler", ComponentType.SECURITY,
             "AuthenticationFailureHandler", ComponentType.SECURITY,
             "LogoutHandler", ComponentType.SECURITY,
+            "DataFetcherExceptionHandler", ComponentType.EXCEPTION_HANDLER,
+            "DataFetcherExceptionResolver", ComponentType.EXCEPTION_HANDLER,
+            "DataFetcherExceptionResolverAdapter", ComponentType.EXCEPTION_HANDLER,
             "WebMvcConfigurer", ComponentType.CONFIGURATION,
             "WebSecurityConfigurerAdapter", ComponentType.SECURITY,
             "RuntimeException", ComponentType.EXCEPTION,
@@ -94,6 +103,8 @@ public class ComponentClassifier {
             Map.entry("Controller", ComponentType.CONTROLLER),
             Map.entry("Resource", ComponentType.CONTROLLER),
             Map.entry("Endpoint", ComponentType.CONTROLLER),
+            Map.entry("DataFetcher", ComponentType.CONTROLLER),
+            Map.entry("Datafetcher", ComponentType.CONTROLLER),
             Map.entry("ServiceImpl", ComponentType.SERVICE),
             Map.entry("Service", ComponentType.SERVICE),
             Map.entry("Repository", ComponentType.REPOSITORY),
@@ -103,6 +114,8 @@ public class ComponentClassifier {
             Map.entry("Entity", ComponentType.ENTITY),
             Map.entry("Dto", ComponentType.DTO),
             Map.entry("DTO", ComponentType.DTO),
+            Map.entry("ViewModel", ComponentType.DTO),
+            Map.entry("VM", ComponentType.DTO),
             Map.entry("Request", ComponentType.DTO),
             Map.entry("Response", ComponentType.DTO),
             Map.entry("Payload", ComponentType.DTO),
@@ -135,6 +148,7 @@ public class ComponentClassifier {
             "models", ComponentType.ENTITY,
             "domain", ComponentType.ENTITY,
             "dto", ComponentType.DTO,
+            "vm", ComponentType.DTO,
             "dtos", ComponentType.DTO,
             "payload", ComponentType.DTO,
             "request", ComponentType.DTO,
@@ -231,6 +245,9 @@ public class ComponentClassifier {
         if (methodAnnotations.stream().anyMatch(AnnotationConstants.MAPPING_ANNOTATIONS::contains)
                 && !metadata.isInterface()) {
             candidates.add(new Candidate(ComponentType.CONTROLLER, Layer.STRUCTURE, "declares request-mapping methods"));
+        }
+        if (methodAnnotations.stream().anyMatch(GRAPHQL_HANDLER_ANNOTATIONS::contains) && !metadata.isInterface()) {
+            candidates.add(new Candidate(ComponentType.CONTROLLER, Layer.STRUCTURE, "declares GraphQL handler methods"));
         }
         if (methodAnnotations.contains(AnnotationConstants.EXCEPTION_HANDLER)) {
             candidates.add(new Candidate(ComponentType.EXCEPTION_HANDLER, Layer.STRUCTURE, "declares @ExceptionHandler methods"));

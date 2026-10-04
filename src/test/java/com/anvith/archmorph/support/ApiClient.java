@@ -26,21 +26,46 @@ public final class ApiClient {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final JsonMapper json = JsonMapper.builder().build();
     private final String base;
+    private final java.util.Map<String, String> headers;
 
     public ApiClient(int port) {
-        this.base = "http://localhost:" + port;
+        this("http://localhost:" + port, java.util.Map.of());
+    }
+
+    private ApiClient(String base, java.util.Map<String, String> headers) {
+        this.base = base;
+        this.headers = headers;
+    }
+
+    /** A client that sends these headers on every request (e.g. Authorization). */
+    public ApiClient withHeaders(java.util.Map<String, String> extra) {
+        java.util.Map<String, String> all = new java.util.LinkedHashMap<>(headers);
+        all.putAll(extra);
+        return new ApiClient(base, java.util.Map.copyOf(all));
+    }
+
+    /** HTTP Basic credentials plus the X-Requested-With header the UI sends. */
+    public ApiClient as(String username, String password) {
+        String token = java.util.Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
+        return withHeaders(java.util.Map.of("Authorization", "Basic " + token, "X-Requested-With", "XMLHttpRequest"));
+    }
+
+    private HttpRequest.Builder request(String path) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base + path));
+        headers.forEach(builder::header);
+        return builder;
     }
 
     public HttpResponse<String> get(String path) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create(base + path)).GET().build(), HttpResponse.BodyHandlers.ofString());
+        return http.send(request(path).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
     public HttpResponse<byte[]> getBytes(String path) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create(base + path)).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
+        return http.send(request(path).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
     }
 
     public HttpResponse<String> send(String method, String path, String jsonBody) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(base + path))
+        HttpRequest.Builder request = request(path)
                 .method(method, jsonBody == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(jsonBody));
         if (jsonBody != null) {
             request.header("Content-Type", "application/json");
@@ -49,7 +74,7 @@ public final class ApiClient {
     }
 
     public HttpResponse<String> options(String path, String origin) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create(base + path))
+        return http.send(request(path)
                 .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
                 .header("Origin", origin)
                 .header("Access-Control-Request-Method", "POST").build(), HttpResponse.BodyHandlers.ofString());
@@ -62,7 +87,7 @@ public final class ApiClient {
                 + "\"\r\nContent-Type: application/zip\r\n\r\n").getBytes(StandardCharsets.UTF_8));
         body.write(content);
         body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-        return http.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/projects"))
+        return http.send(request("/api/v1/projects")
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray())).build(), HttpResponse.BodyHandlers.ofString());
     }

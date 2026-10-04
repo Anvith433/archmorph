@@ -40,7 +40,7 @@ export function ValidationPage() {
         <div>
           <h1 className="text-xl font-semibold text-fg">Validation</h1>
           <p className="max-w-3xl text-sm text-muted">
-            Seven levels, from file-system checks to an optional sandboxed Maven compile. Passing validation means the transformed project is structurally consistent and
+            Seven levels, from file-system checks to an optional sandboxed Maven or Gradle compile. Passing validation means the transformed project is structurally consistent and
             compiles where a build was run — it does not prove behaviour is unchanged. Run your own tests.
           </p>
         </div>

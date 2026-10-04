@@ -7,6 +7,7 @@ import com.anvith.archmorph.analysis.validation.ValidationIssue;
 import com.anvith.archmorph.analysis.validation.ValidationLevel;
 import com.anvith.archmorph.analysis.validation.ValidationStatus;
 import com.anvith.archmorph.analysis.validation.build.BuildPluginGuard;
+import com.anvith.archmorph.analysis.validation.build.SandboxedGradleRunner;
 import com.anvith.archmorph.analysis.validation.build.SandboxedMavenRunner;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
 import com.anvith.archmorph.workspace.WorkspaceManager;
@@ -24,9 +25,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Level 7: Maven compile (or test) of the transformed project, in a sandboxed child process on a
- * scratch <em>copy</em> of the project (the transformed workspace never receives {@code target/}).
- * Never runs uploaded wrappers or scripts; see {@link SandboxedMavenRunner}.
+ * Level 7: Maven (or, when enabled, Gradle) compile or test of the transformed project, in a sandboxed child process
+ * on a scratch <em>copy</em> of the project (the transformed workspace never receives build output).
+ * Never runs uploaded wrappers or scripts; see {@link SandboxedMavenRunner} and {@link SandboxedGradleRunner}.
  */
 @Component
 public class BuildValidator {
@@ -39,13 +40,20 @@ public class BuildValidator {
     public record Outcome(LevelResult level, BuildResult build) {
     }
 
+    /** {@code /path/File.java:12: error: cannot find symbol} — javac as printed by Gradle. */
+    private static final Pattern JAVAC_ERROR =
+            Pattern.compile("(?<file>\\S.*?\\.java):(?<line>\\d+):\\s+error:\\s+(?<msg>.*)");
+
     private final ArchMorphProperties properties;
     private final SandboxedMavenRunner runner;
+    private final SandboxedGradleRunner gradleRunner;
     private final BuildPluginGuard guard;
 
-    public BuildValidator(ArchMorphProperties properties, SandboxedMavenRunner runner, BuildPluginGuard guard) {
+    public BuildValidator(ArchMorphProperties properties, SandboxedMavenRunner runner, SandboxedGradleRunner gradleRunner,
+                          BuildPluginGuard guard) {
         this.properties = properties;
         this.runner = runner;
+        this.gradleRunner = gradleRunner;
         this.guard = guard;
     }
 
@@ -55,8 +63,13 @@ public class BuildValidator {
         if (!config.isEnabled()) {
             return new Outcome(LevelResult.skipped(level, "Build validation is disabled in the configuration."), null);
         }
-        if (!runner.mavenAvailable()) {
-            return new Outcome(LevelResult.skipped(level, "Maven was not found on this server."), null);
+        boolean gradle = context.original().structure().buildTool() == com.anvith.archmorph.parser.ProjectStructure.BuildTool.GRADLE;
+        if (gradle && !config.isGradleEnabled()) {
+            return new Outcome(LevelResult.skipped(level, "Gradle build scripts are code; Gradle builds are disabled "
+                    + "(archmorph.validation.build.gradle-enabled=false). Levels 1-6 do not execute uploaded code."), null);
+        }
+        if (gradle ? !gradleRunner.gradleAvailable() : !runner.mavenAvailable()) {
+            return new Outcome(LevelResult.skipped(level, (gradle ? "Gradle" : "Maven") + " was not found on this server."), null);
         }
 
         Path projectDir = context.scratch().resolve("project");
@@ -64,8 +77,8 @@ public class BuildValidator {
         long started = System.nanoTime();
         try {
             copyForBuild(context.transformedRoot(), projectDir);
-            List<String> denied = guard.deniedPlugins(projectDir);
-            if (!denied.isEmpty() || guard.hasEscapingModule(projectDir)) {
+            List<String> denied = gradle ? List.of() : guard.deniedPlugins(projectDir);
+            if (!gradle && (!denied.isEmpty() || guard.hasEscapingModule(projectDir))) {
                 return new Outcome(LevelResult.skipped(level, "The build was not run: the project declares build plugins that "
                         + "execute arbitrary commands (" + String.join(", ", denied) + ") or modules outside the project."), null);
             }
@@ -76,7 +89,9 @@ public class BuildValidator {
                 case COMPILE -> hasTests ? SandboxedMavenRunner.Goal.TEST_COMPILE : SandboxedMavenRunner.Goal.COMPILE;
             };
             Files.createDirectories(mavenRepository);
-            BuildResult build = runner.run(projectDir, buildHome, mavenRepository, goal);
+            BuildResult build = gradle
+                    ? gradleRunner.run(projectDir, buildHome, gradleUserHome(mavenRepository), goal)
+                    : runner.run(projectDir, buildHome, mavenRepository, goal);
             return new Outcome(evaluate(build, started), build);
         } catch (IOException | RuntimeException e) {
             log.warn("Build validation could not run: {}", e.getClass().getSimpleName());
@@ -86,13 +101,20 @@ public class BuildValidator {
         }
     }
 
+    /** Shared Gradle cache next to the shared Maven repository, unless configured. */
+    private Path gradleUserHome(Path mavenRepository) {
+        String configured = properties.getValidation().getBuild().getGradleUserHome();
+        return configured == null || configured.isBlank() ? mavenRepository.resolveSibling("gradle-home") : Path.of(configured);
+    }
+
     private LevelResult evaluate(BuildResult build, long startedNanos) {
         long millis = (System.nanoTime() - startedNanos) / 1_000_000;
         ValidationLevel level = ValidationLevel.BUILD;
+        String tool = !build.command().isEmpty() && "gradle".equals(build.command().getFirst()) ? "Gradle" : "Maven";
         if (build.timedOut()) {
             return new LevelResult(level, ValidationStatus.FAIL,
                     "The build exceeded the time limit and was stopped.", 1,
-                    List.of(ValidationIssue.error(null, 0, "Maven timed out after " + (build.durationMillis() / 1000) + " s.",
+                    List.of(ValidationIssue.error(null, 0, tool + " timed out after " + (build.durationMillis() / 1000) + " s.",
                             "Increase archmorph.validation.build.timeout or check the project for long-running plugins.")), millis);
         }
         if (build.exitCode() == 0) {
@@ -102,6 +124,12 @@ public class BuildValidator {
 
         List<ValidationIssue> issues = new ArrayList<>();
         String all = build.stdout() + "\n" + build.stderr();
+        Matcher javac = JAVAC_ERROR.matcher(all);
+        while (javac.find() && issues.size() < 50) {
+            String file = javac.group("file").replace("<project>/", "");
+            String message = javac.group("msg").trim();
+            issues.add(ValidationIssue.error(file, Integer.parseInt(javac.group("line")), message, probableCause(message)));
+        }
         Matcher matcher = COMPILER_ERROR.matcher(all);
         while (matcher.find() && issues.size() < 50) {
             String file = matcher.group("file").replace("<project>/", "");
@@ -110,15 +138,19 @@ public class BuildValidator {
         }
         if (issues.isEmpty()) {
             boolean resolution = all.contains("Could not resolve") || all.contains("Non-resolvable")
+                    || all.contains("Could not GET") || all.contains("No cached version")
                     || all.contains("offline mode") || all.contains("Failed to read artifact descriptor")
                     || all.contains("Could not transfer") || all.contains("Plugin ") && all.contains("could not be resolved");
             if (resolution) {
                 return new LevelResult(level, ValidationStatus.SKIPPED,
-                        "Maven could not resolve dependencies or plugins in the sandbox; the compile result is unknown.", 0,
+                        tool + " could not resolve dependencies or plugins in the sandbox; the compile result is unknown.", 0,
                         List.of(), millis);
             }
-            String first = all.lines().filter(l -> l.contains("[ERROR]")).findFirst().orElse("Maven reported a failure.").trim();
-            issues.add(ValidationIssue.error(null, 0, truncate(first), "See the captured build output."));
+            String first = all.lines().filter(l -> l.contains("[ERROR]") || l.startsWith("FAILURE:") || l.contains("What went wrong")).findFirst().orElse(tool + " reported a failure.").trim();
+            issues.add(ValidationIssue.error(null, 0, truncate(first), "Gradle".equals(tool)
+                    ? "No compiler error was reported. Check the captured output: a Gradle or plugin version mismatch "
+                    + "with the project's wrapper fails the original project in the same way."
+                    : "See the captured build output."));
         }
         return LevelResult.of(level, issues, "build succeeded", millis);
     }
@@ -148,6 +180,9 @@ public class BuildValidator {
                 String normalized = relative.toString().replace('\\', '/');
                 if (normalized.isEmpty() || normalized.equals(".mvn") || normalized.startsWith(".mvn/")
                         || normalized.endsWith("mvnw") || normalized.endsWith("mvnw.cmd")
+                        || normalized.endsWith("gradlew") || normalized.endsWith("gradlew.bat")
+                        || normalized.equals("gradle/wrapper") || normalized.startsWith("gradle/wrapper/")
+                        || normalized.equals(".gradle") || normalized.startsWith(".gradle/")
                         || Files.isSymbolicLink(file)) {
                     continue;
                 }

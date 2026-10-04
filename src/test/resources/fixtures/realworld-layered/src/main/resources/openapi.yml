@@ -1,0 +1,13 @@
+openapi: 3.0.1
+info:
+  title: Clinic
+  version: 1.0.0
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        birthDate:
+          type: string
+          format: date
+          x-field-extra-annotation: "@com.clinic.rest.validation.PetAgeValidation"

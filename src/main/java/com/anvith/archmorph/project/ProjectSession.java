@@ -44,6 +44,8 @@ public class ProjectSession {
     private ValidationReport validation;
     private boolean transformedAvailable;
     private Instant lastActivity = Instant.now();
+    private volatile com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy;
+    private volatile Boolean modulithVerification;
 
     public ProjectSession(ProjectWorkspace workspace, String displayName, String ownerId, long archiveBytes) {
         this.workspace = workspace;
@@ -55,6 +57,24 @@ public class ProjectSession {
 
     public ReentrantLock lock() {
         return lock;
+    }
+
+    /** Target layout chosen for this project, or null for the configured default. */
+    public com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy() {
+        return strategy;
+    }
+
+    public void setStrategy(com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy) {
+        this.strategy = strategy;
+    }
+
+    /** Whether to add Spring Modulith verification, or null for the configured default. */
+    public Boolean modulithVerification() {
+        return modulithVerification;
+    }
+
+    public void setModulithVerification(Boolean modulithVerification) {
+        this.modulithVerification = modulithVerification;
     }
 
     public void touch() {

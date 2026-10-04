@@ -218,6 +218,112 @@ public final class ExtractionContext {
         return Optional.empty();
     }
 
+    private static final java.util.Set<String> LOMBOK_GETTERS = java.util.Set.of("Data", "Getter", "Value");
+    private final java.util.Map<com.github.javaparser.ast.CompilationUnit, TypeContext> contexts = new java.util.IdentityHashMap<>();
+
+    /**
+     * Static type of an expression, without the symbol solver, when it is a project class: a variable, parameter or
+     * field, or a getter call on a project class — including getters that Lombok generates ({@code @Data},
+     * {@code @Getter}, {@code @Value}) and record accessors, which have no source the solver could read.
+     *
+     * @return the qualified name of the project type
+     */
+    public Optional<String> inferProjectType(Expression expression, Node at) {
+        return inferProjectType(expression, at, 0);
+    }
+
+    private Optional<String> inferProjectType(Expression expression, Node at, int depth) {
+        if (depth > 8) {
+            return Optional.empty();
+        }
+        if (expression instanceof com.github.javaparser.ast.expr.EnclosedExpr enclosed) {
+            return inferProjectType(enclosed.getInner(), at, depth + 1);
+        }
+        if (expression instanceof com.github.javaparser.ast.expr.NameExpr name) {
+            return variableType(name.getNameAsString(), at).flatMap(type -> projectType(type, typeContext));
+        }
+        if (expression instanceof com.github.javaparser.ast.expr.FieldAccessExpr access
+                && access.getScope() instanceof com.github.javaparser.ast.expr.ThisExpr) {
+            return variableType(access.getNameAsString(), at).flatMap(type -> projectType(type, typeContext));
+        }
+        if (expression instanceof com.github.javaparser.ast.expr.MethodCallExpr call && call.getScope().isPresent()
+                && call.getArguments().isEmpty()) {
+            Optional<String> owner = inferProjectType(call.getScope().get(), at, depth + 1)
+                    .or(() -> solveExpressionType(call.getScope().get()));
+            return owner.flatMap(o -> accessorType(o, call.getNameAsString()));
+        }
+        return Optional.empty();
+    }
+
+    /** Return type of a no-argument accessor of a project class: declared method, Lombok getter or record component. */
+    private Optional<String> accessorType(String ownerQualifiedName, String method) {
+        DependencyNode node = nodeLookup.apply(ownerQualifiedName);
+        if (node == null) {
+            int dot = ownerQualifiedName.lastIndexOf('.');
+            node = dot > 0 ? nodeLookup.apply(ownerQualifiedName.substring(0, dot)) : null;
+        }
+        if (node == null || node.getCompilationUnit() == null) {
+            return Optional.empty();
+        }
+        com.github.javaparser.ast.CompilationUnit cu = node.getCompilationUnit();
+        String simpleName = ownerQualifiedName.substring(ownerQualifiedName.lastIndexOf('.') + 1);
+        Optional<TypeDeclaration<?>> type = cu.findFirst(TypeDeclaration.class, t -> t.getNameAsString().equals(simpleName))
+                .map(t -> (TypeDeclaration<?>) t);
+        if (type.isEmpty()) {
+            return Optional.empty();
+        }
+        TypeContext context = contexts.computeIfAbsent(cu, TypeContext::of);
+        for (com.github.javaparser.ast.body.MethodDeclaration declared : type.get().getMethodsByName(method)) {
+            if (declared.getParameters().isEmpty()) {
+                return projectType(declared.getType(), context);
+            }
+        }
+        if (type.get() instanceof RecordDeclaration record) {
+            for (Parameter component : record.getParameters()) {
+                if (component.getNameAsString().equals(method)) {
+                    return projectType(component.getType(), context);
+                }
+            }
+        }
+        String property = method.startsWith("get") && method.length() > 3 ? method.substring(3)
+                : method.startsWith("is") && method.length() > 2 ? method.substring(2) : null;
+        if (property == null) {
+            return Optional.empty();
+        }
+        String field = Character.toLowerCase(property.charAt(0)) + property.substring(1);
+        boolean classGetters = type.get().getAnnotations().stream().anyMatch(a -> LOMBOK_GETTERS.contains(a.getName().getIdentifier()));
+        for (FieldDeclaration declaration : type.get().getFields()) {
+            boolean fieldGetter = declaration.getAnnotations().stream().anyMatch(a -> a.getName().getIdentifier().equals("Getter"));
+            if (!classGetters && !fieldGetter) {
+                continue;
+            }
+            for (VariableDeclarator variable : declaration.getVariables()) {
+                if (variable.getNameAsString().equals(field)) {
+                    return projectType(variable.getType(), context);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Qualified name of a declared type when it is a project class ({@code List<Order>} and arrays are not). */
+    private Optional<String> projectType(Type type, TypeContext context) {
+        if (!type.isClassOrInterfaceType()) {
+            return Optional.empty();
+        }
+        var classType = type.asClassOrInterfaceType();
+        if (classType.getTypeArguments().isPresent()) {
+            return Optional.empty();
+        }
+        ResolvedType resolved = resolver.resolve(classType.getNameWithScope(), context);
+        return resolved != null && resolved.internal() ? Optional.ofNullable(resolved.qualifiedName()) : Optional.empty();
+    }
+
+    /** True when {@code qualifiedName} names a project class (top-level or nested). */
+    public boolean isProjectType(String qualifiedName) {
+        return resolver.resolveQualified(qualifiedName, 1.0, ResolvedType.Resolution.FULLY_QUALIFIED).internal();
+    }
+
     /** Resolve a qualified name produced by the symbol solver. */
     public void connectQualified(String qualifiedName, DependencyType kind, Node at) {
         connectResolved(resolver.resolveQualified(qualifiedName, 0.9,

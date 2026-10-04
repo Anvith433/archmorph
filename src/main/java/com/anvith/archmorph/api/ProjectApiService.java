@@ -201,6 +201,51 @@ public class ProjectApiService {
         return mapper.modules(session);
     }
 
+    public PlanDtos.PlanDto changeStrategy(String projectId,
+                                           com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy,
+                                           Boolean addModulithVerification, String clientId) {
+        ProjectSession session = analysed(projectId, clientId);
+        requireIdle(session);
+        workflow.changeStrategy(session, strategy, addModulithVerification);
+        return mapper.plan(session.plan(), session.finalModules());
+    }
+
+    /** The plan the current decisions would produce with another layout; the project is not changed. */
+    public PlanDtos.PlanDto previewPlan(String projectId, com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy,
+                                        String clientId) {
+        ProjectSession session = analysed(projectId, clientId);
+        return mapper.plan(workflow.previewPlan(session, strategy), session.finalModules());
+    }
+
+    public ModuleDtos.DecisionsDto decisions(String projectId, String clientId) {
+        ProjectSession session = analysed(projectId, clientId);
+        return mapper.decisions(session, workflow.strategyOf(session), workflow.modulithVerificationOf(session));
+    }
+
+    public ModuleDtos.DecisionsDto applyDecisions(String projectId, ModuleDtos.DecisionsDto decisions, String clientId) {
+        ProjectSession session = analysed(projectId, clientId);
+        requireIdle(session);
+        if (decisions.version() != ModuleDtos.DecisionsDto.CURRENT_VERSION) {
+            throw new com.anvith.archmorph.common.exception.ArchMorphException(
+                    com.anvith.archmorph.common.exception.ErrorCode.INVALID_REQUEST,
+                    "Unsupported decisions file version " + decisions.version() + ".",
+                    "Export the decisions again with this version of ArchMorph.");
+        }
+        com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy = null;
+        if (decisions.strategy() != null) {
+            try {
+                strategy = com.anvith.archmorph.analysis.transformation.target.TargetStrategy.valueOf(decisions.strategy());
+            } catch (IllegalArgumentException e) {
+                throw new com.anvith.archmorph.common.exception.ArchMorphException(
+                        com.anvith.archmorph.common.exception.ErrorCode.INVALID_REQUEST, "Unknown target strategy.",
+                        "Use MODULAR_MONOLITH or MODULAR_BY_DOMAIN.");
+            }
+        }
+        workflow.applyDecisions(session, strategy, decisions.addModulithVerification(),
+                decisions.edits().stream().map(mapper::edit).toList());
+        return mapper.decisions(session, workflow.strategyOf(session), workflow.modulithVerificationOf(session));
+    }
+
     public PlanDtos.DryRunDto dryRun(String projectId, String clientId) {
         ProjectSession session = analysed(projectId, clientId);
         requireIdle(session);

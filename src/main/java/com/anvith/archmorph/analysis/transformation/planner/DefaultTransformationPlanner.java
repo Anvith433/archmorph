@@ -97,7 +97,8 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         String basePackage = basePackageResolver.resolve(productionPackages);
         plan.setBasePackage(basePackage);
 
-        TransformationMappingReport mappings = mappingEngine.build(moduleReport, basePackage, strategy);
+        TransformationMappingReport mappings = mappingEngine.build(moduleReport, basePackage, strategy,
+                exposedTypes(graph, moduleReport));
         Map<String, ClassMetadata> typeByName = new HashMap<>();
         model.allTypes().forEach(t -> typeByName.put(t.getQualifiedName(), t));
 
@@ -107,6 +108,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         }
 
         applyStringReferenceRules(main, model, plan);
+        applyResourceReferenceRule(main, model);
         applyScanRootRule(main, model);
         stabilise(main, graph, plan, SourceScope.MAIN);
 
@@ -136,6 +138,30 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
                 all.size(), plan.movedCount(), plan.getConflicts().size(),
                 all.stream().filter(e -> e.getSafety() == SafetyLevel.MANUAL_REVIEW).count());
         return plan;
+    }
+
+    /**
+     * Classes used by code outside their own module. In a layout that separates module APIs from internals
+     * they form the module's public API.
+     */
+    public static Set<String> exposedTypes(DependencyGraph graph, ModuleDiscoveryReport modules) {
+        Set<String> exposed = new TreeSet<>();
+        for (var edge : graph.getEdges()) {
+            String from = modules.moduleOf(edge.getSource().getId());
+            String to = modules.moduleOf(edge.getTarget().getId());
+            if (from != null && to != null && !from.equals(to)) {
+                exposed.add(edge.getTarget().getId());
+            }
+        }
+        // user decisions: internal classes are only accepted while unused by other modules (checked on edit)
+        modules.getExposureOverrides().forEach((type, exposure) -> {
+            if (exposure == com.anvith.archmorph.analysis.module.Exposure.PUBLIC_API) {
+                exposed.add(type);
+            } else {
+                exposed.remove(type);
+            }
+        });
+        return exposed;
     }
 
     // ================================================================== entries
@@ -169,14 +195,14 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         entry.setFolder(m.getFolderType());
         entry.setConfidence(assignment.confidence());
         entry.setTargetPackage(m.getTargetPackage());
-        entry.setTargetFile(targetPath(SourceScope.MAIN, m.getTargetPackage(), file.getFileName()));
+        entry.setTargetFile(targetPath(file, m.getTargetPackage()));
 
         if (assignment.excluded()) {
             keep(entry, SafetyLevel.SAFE, "excluded from the transformation by the user");
             entry.getActions().add(TransformationAction.EXCLUDE);
             return entry;
         }
-        if (assignment.category() == ModuleCategory.APPLICATION) {
+        if (assignment.category() == ModuleCategory.APPLICATION && primary.getComponentType() == ComponentType.APPLICATION) {
             keep(entry, SafetyLevel.SAFE, "application entry point stays at the component-scan root");
             return entry;
         }
@@ -263,7 +289,7 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
             entry.setModule(tested.get().getModule());
             entry.setFolder(tested.get().getFolder());
             entry.setTargetPackage(tested.get().getTargetPackage());
-            entry.setTargetFile(targetPath(SourceScope.TEST, tested.get().getTargetPackage(), file.getFileName()));
+            entry.setTargetFile(targetPath(file, tested.get().getTargetPackage()));
             entry.getActions().add(TransformationAction.MOVE);
             entry.getActions().add(TransformationAction.REWRITE_PACKAGE);
             retargetClasses(entry);
@@ -302,12 +328,25 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
         return entry;
     }
 
-    private Path targetPath(SourceScope scope, String targetPackage, String fileName) {
-        Path path = Path.of("src", scope == SourceScope.MAIN ? "main" : "test", "java");
+    /**
+     * New location of a file: same source root (so a class never leaves its Maven module or Gradle subproject),
+     * package directory of the target package.
+     */
+    static Path targetPath(SourceFile file, String targetPackage) {
+        Path path = sourceRootPrefix(file);
         if (targetPackage != null && !targetPackage.isEmpty()) {
             path = path.resolve(targetPackage.replace('.', '/'));
         }
-        return path.resolve(fileName);
+        return path.resolve(file.getFileName());
+    }
+
+    /** Project-relative source root of a file, e.g. {@code domain/src/main/java}. */
+    static Path sourceRootPrefix(SourceFile file) {
+        String relative = file.getRelativePath().replace('\\', '/');
+        String withinRoot = file.getSourceRoot().relativize(file.getAbsolutePath()).toString().replace('\\', '/');
+        String prefix = relative.endsWith(withinRoot) ? relative.substring(0, relative.length() - withinRoot.length()) : "";
+        prefix = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+        return prefix.isEmpty() ? Path.of("") : Path.of(prefix);
     }
 
     // ================================================================== rules
@@ -338,6 +377,25 @@ public class DefaultTransformationPlanner implements TransformationPlanner {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Resource files are never rewritten. A class whose fully-qualified name appears in one (an OpenAPI spec
+     * naming a validation annotation, {@code spring.factories}, an XML bean definition, ...) therefore stays
+     * where it is, otherwise the build or the runtime would look for it at the old location.
+     */
+    private void applyResourceReferenceRule(List<TransformationPlanEntry> entries, ProjectModel model) {
+        Map<String, TransformationPlanEntry> entryByType = entryIndex(entries);
+        Set<String> tokens = new TreeSet<>();
+        entries.stream().filter(TransformationPlanEntry::isMoved)
+                .forEach(e -> e.getClasses().stream().filter(c -> !c.nested()).forEach(c -> tokens.add(c.sourceQualifiedName())));
+        for (ResourceFinding finding : resourceScanner.scan(model.structure(), tokens)) {
+            TransformationPlanEntry target = entryByType.get(finding.reference());
+            if (target != null && target.isMoved()) {
+                demote(target, SafetyLevel.MANUAL_REVIEW, "its fully-qualified name appears in " + finding.file() + ":"
+                        + finding.line() + "; resource files are not rewritten, so the class stays where it is");
             }
         }
     }

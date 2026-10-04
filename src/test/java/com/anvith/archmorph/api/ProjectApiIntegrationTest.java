@@ -84,6 +84,15 @@ class ProjectApiIntegrationTest {
         assertThat(invalidEdit.statusCode()).isEqualTo(400);
         assertThat(api.json(invalidEdit).get("errorCode").asString()).isEqualTo("INVALID_MODULE_OPERATION");
 
+        // the default target is the modular monolith; this flow checks the package-by-module layout
+        assertThat(api.data(api.get(p + "/plan")).get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        HttpResponse<String> badStrategy = api.send("PUT", p + "/strategy", "{\"strategy\":\"MICROSERVICES\"}");
+        assertThat(badStrategy.statusCode()).isEqualTo(400);
+        ApiClient.assertSafeError(badStrategy);
+        HttpResponse<String> strategy = api.send("PUT", p + "/strategy", "{\"strategy\":\"MODULAR_BY_DOMAIN\"}");
+        assertThat(strategy.statusCode()).as(strategy.body()).isEqualTo(200);
+        assertThat(api.data(strategy).get("strategy").asString()).isEqualTo("MODULAR_BY_DOMAIN");
+
         JsonNode plan = api.data(api.get(p + "/plan"));
         assertThat(plan.get("classMap").get("com.demo.service.UserService").asString())
                 .isEqualTo("com.demo.modules.customer.service.UserService");
@@ -133,6 +142,7 @@ class ProjectApiIntegrationTest {
                 "src/main/java/com/demo/shared/security/SecurityConfig.java", "src/main/resources/application.properties",
                 "src/test/java/com/demo/modules/customer/service/UserServiceTest.java");
         assertThat(names).noneMatch(n -> n.startsWith("/") || n.contains(".."));
+        assertThat(names).contains("MODULES.md");
 
         for (String report : List.of("analysis.json", "modules.json", "transformation-plan.json", "validation.json",
                 "analysis.md", "transformation-summary.md", "validation-report.md")) {
@@ -201,5 +211,79 @@ class ProjectApiIntegrationTest {
         HttpResponse<String> denied = api.options("/api/v1/projects", "https://evil.example");
         assertThat(denied.statusCode()).isEqualTo(403);
         assertThat(denied.headers().firstValue("Access-Control-Allow-Origin")).isEmpty();
+    }
+
+    @Test
+    void defaultTransformationIsAModularMonolithWithDocumentedModuleApis() throws Exception {
+        JsonNode created = api.data(api.upload(ApiClient.zipFixture("spring-layered"), "shop.zip"));
+        assertThat(api.awaitJob(created.get("jobId").asString()).get("status").asString()).isEqualTo("COMPLETED");
+        String p = "/api/v1/projects/" + created.get("projectId").asString();
+
+        JsonNode plan = api.data(api.get(p + "/plan"));
+        assertThat(plan.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(plan.get("classMap").get("com.demo.service.UserService").asString()).isEqualTo("com.demo.user.UserService");
+        assertThat(plan.get("classMap").get("com.demo.controller.UserController").asString())
+                .isEqualTo("com.demo.user.controller.UserController");
+        JsonNode preview = api.data(api.get(p + "/plan?strategy=MODULAR_BY_DOMAIN"));
+        assertThat(preview.get("classMap").get("com.demo.service.UserService").asString())
+                .isEqualTo("com.demo.modules.user.service.UserService");
+        assertThat(api.data(api.get(p + "/plan")).get("strategy").asString()).as("preview changes nothing").isEqualTo("MODULAR_MONOLITH");
+        assertThat(api.get(p + "/plan?strategy=NOPE").statusCode()).isEqualTo(400);
+        JsonNode proposed = api.data(api.get(p + "/architecture")).get("proposed");
+        assertThat(proposed.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(proposed.get("modules").toString()).contains("(api)");
+
+        HttpResponse<String> modulith = api.send("PUT", p + "/strategy",
+                "{\"strategy\":\"MODULAR_MONOLITH\",\"addModulithVerification\":true}");
+        assertThat(modulith.statusCode()).as(modulith.body()).isEqualTo(200);
+        assertThat(api.data(modulith).get("modulithVerification").asBoolean()).isTrue();
+
+        JsonNode job = api.awaitJob(api.data(api.send("POST", p + "/transform", null)).get("jobId").asString());
+        assertThat(job.get("status").asString()).as(job.toString()).isEqualTo("COMPLETED");
+        assertThat(api.data(api.get(p + "/plan")).get("generatedFiles").toString()).contains("src/test/java/com/demo/ModularityTests.java");
+        JsonNode validation = api.data(api.get(p + "/validation"));
+        for (JsonNode level : validation.get("levels")) {
+            if (level.get("level").asString().equals("FILESYSTEM")) {
+                assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
+            }
+            if (level.get("level").asString().equals("ARCHITECTURE_RULES")) {
+                assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
+            }
+        }
+
+        // the review can be exported and replayed on a fresh upload of the same project
+        JsonNode exported = api.data(api.get(p + "/decisions"));
+        assertThat(exported.get("version").asInt()).isEqualTo(1);
+        assertThat(exported.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
+        assertThat(exported.get("addModulithVerification").asBoolean()).isTrue();
+        JsonNode second = api.data(api.upload(ApiClient.zipFixture("spring-layered"), "shop.zip"));
+        api.awaitJob(second.get("jobId").asString());
+        String p2 = "/api/v1/projects/" + second.get("projectId").asString();
+        HttpResponse<String> replay = api.send("PUT", p2 + "/decisions", exported.toString());
+        assertThat(replay.statusCode()).as(replay.body()).isEqualTo(200);
+        assertThat(api.data(api.get(p2 + "/plan")).get("modulithVerification").asBoolean()).isTrue();
+        HttpResponse<String> badVersion = api.send("PUT", p2 + "/decisions", "{\"version\":7,\"edits\":[]}");
+        assertThat(badVersion.statusCode()).isEqualTo(400);
+        ApiClient.assertSafeError(badVersion);
+
+        String modulesMd = null;
+        String pom = null;
+        String modularityTest = null;
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(api.getBytes(p + "/download").body()))) {
+            for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                String content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                switch (entry.getName()) {
+                    case "MODULES.md" -> modulesMd = content;
+                    case "pom.xml" -> pom = content;
+                    case "src/test/java/com/demo/ModularityTests.java" -> modularityTest = content;
+                    default -> { }
+                }
+            }
+        }
+        assertThat(pom).contains("<artifactId>spring-modulith-bom</artifactId>", "<artifactId>spring-modulith-starter-test</artifactId>");
+        assertThat(modularityTest).contains("ApplicationModules.of(DemoApplication.class).verify();");
+        assertThat(modulesMd).isNotNull()
+                .contains("# Modules of shop", "## user", "**Public API** (used by other modules): `User`",
+                        "ApplicationModules.of(DemoApplication.class).verify()");
     }
 }

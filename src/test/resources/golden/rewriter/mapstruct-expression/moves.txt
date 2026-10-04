@@ -1,0 +1,2 @@
+com.demo.mapper.OrderMapper = com.demo.order.mapper.OrderMapper
+com.demo.util.Totals = com.demo.order.Totals

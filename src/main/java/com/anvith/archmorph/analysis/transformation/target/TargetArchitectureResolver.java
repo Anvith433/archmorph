@@ -22,10 +22,10 @@ public class TargetArchitectureResolver {
                 .findFirst()
                 .orElseThrow(() -> new ArchMorphException(ErrorCode.INVALID_REQUEST,
                         "The target architecture strategy " + strategy + " is not supported yet.",
-                        "Use MODULAR_BY_DOMAIN."));
+                        "Use MODULAR_MONOLITH or MODULAR_BY_DOMAIN."));
     }
 
     public TargetArchitecture defaultArchitecture() {
-        return resolve(TargetStrategy.MODULAR_BY_DOMAIN);
+        return resolve(TargetStrategy.MODULAR_MONOLITH);
     }
 }

@@ -66,8 +66,11 @@ public class ValidationEngine {
 
         Supplier<ValidationContext.TransformedProject> transformed = memoize(() -> {
             ProjectStructure structure = structureDetector.detect(transformedRoot);
-            ProjectModel model = modelBuilder.build(structure, Integer.MAX_VALUE, false);
-            DependencyGraph graph = graphBuilder.build(model, Set.of(), false).graph();
+            // Same resolution settings as the original analysis, otherwise edges that only the symbol
+            // solver can infer (chained calls) would look "lost".
+            boolean symbolSolver = properties.getAnalysis().isSymbolSolverEnabled();
+            ProjectModel model = modelBuilder.build(structure, Integer.MAX_VALUE, symbolSolver);
+            DependencyGraph graph = graphBuilder.build(model, Set.of(), symbolSolver).graph();
             return new ValidationContext.TransformedProject(model, graph);
         });
 

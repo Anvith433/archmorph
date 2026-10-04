@@ -1,0 +1,25 @@
+{
+  "description": "Ports and adapters (hexagonal) layout, Gradle build, modelled on spring-boot-realworld-example-app: ports in core.*, adapters in infrastructure.* (an adapter whose name has no domain word joins the module of the port it implements), CurrentUserApi named after 'user', and a GraphQL datafetcher recognised as an endpoint.",
+  "strategy": "MODULAR_MONOLITH",
+  "modules": [
+    "comment",
+    "user"
+  ],
+  "moved": {
+    "com.blog.infrastructure.service.DefaultJwtService": "com.blog.user.DefaultJwtService",
+    "com.blog.infrastructure.repository.InMemoryCommentRepository": "com.blog.comment.InMemoryCommentRepository",
+    "com.blog.api.CurrentUserApi": "com.blog.user.CurrentUserApi",
+    "com.blog.graphql.MeDatafetcher": "com.blog.user.MeDatafetcher",
+    "com.blog.core.service.JwtService": "com.blog.user.service.JwtService",
+    "com.blog.core.comment.CommentRepository": "com.blog.comment.repository.CommentRepository"
+  },
+  "kept": [
+    "com.blog.BlogApplication"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

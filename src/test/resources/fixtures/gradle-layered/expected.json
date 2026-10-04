@@ -1,0 +1,23 @@
+{
+  "description": "Single-project Gradle build (Groovy DSL). The build script is read, never executed.",
+  "modules": [
+    "book",
+    "member"
+  ],
+  "moved": {
+    "com.library.service.BookService": "com.library.modules.book.service.BookService",
+    "com.library.entity.Member": "com.library.modules.member.entity.Member"
+  },
+  "targetFiles": {
+    "src/main/java/com/library/repository/BookRepository.java": "src/main/java/com/library/modules/book/repository/BookRepository.java"
+  },
+  "kept": [
+    "com.library.LibraryApplication"
+  ],
+  "manualReview": [],
+  "sharedClasses": [],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

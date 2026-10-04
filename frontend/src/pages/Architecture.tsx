@@ -16,7 +16,7 @@ export function Architecture() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-fg">Architecture</h1>
-        <p className="text-sm text-muted">The layout as it is today next to the proposed modular-by-domain layout. Nothing is moved until you transform.</p>
+        <p className="text-sm text-muted">The layout as it is today next to the proposed modular layout (choose the target on the Plan page). Nothing is moved until you transform.</p>
       </div>
       {view.error !== undefined && <ErrorPanel error={view.error} onRetry={view.reload} />}
       {!view.data && view.error === undefined && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2"><Skeleton className="h-96" /><Skeleton className="h-96" /></div>}
@@ -115,7 +115,11 @@ function ModuleTree({ name, folders, confidence, count, tone = 'accent' }: {
         <ul className="space-y-2 border-t border-line px-3 py-2 font-mono text-xs">
           {entries.map(([folder, classes]) => (
             <li key={folder}>
-              {folder && <p className="text-faint">{folder}/</p>}
+              {folder === '(api)' ? (
+                <p className="text-accent">public API <span className="text-faint">(module root, used by other modules)</span></p>
+              ) : (
+                folder && <p className="text-faint">{folder}/ <span className="text-faint">internal</span></p>
+              )}
               <ul className={folder ? 'pl-4 text-muted' : 'text-muted'}>
                 {classes.map((c) => <li key={c}>{c}</li>)}
               </ul>

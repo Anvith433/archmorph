@@ -2,9 +2,10 @@ import { FlaskConical, Play } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import type { DryRun, PlanEntry } from '../api/types';
+import type { DryRun, PlanEntry, TargetStrategy } from '../api/types';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { MetricCard } from '../components/MetricCard';
+import { LayoutComparison } from '../components/LayoutComparison';
 import { primaryAction, TransformationTable } from '../components/TransformationTable';
 import { Badge, Button, Code, Panel, Skeleton } from '../components/ui';
 import { useProject } from '../hooks/ProjectContext';
@@ -22,13 +23,18 @@ function matches(entry: PlanEntry, filter: Filter): boolean {
 }
 
 export function PlanPage() {
-  const { projectId, version, project, trackJob } = useProject();
+  const { projectId, version, project, trackJob, refresh } = useProject();
   const plan = useResource(() => api.plan(projectId), `${projectId}:${version}`);
   const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('ALL');
   const [query, setQuery] = useState('');
   const [dryRun, setDryRun] = useState<DryRun>();
-  const [busy, setBusy] = useState<'dry' | 'transform' | null>(null);
+  const [busy, setBusy] = useState<'dry' | 'transform' | 'strategy' | null>(null);
+  const [pendingStrategy, setPendingStrategy] = useState<TargetStrategy | null>(null);
+  const [compare, setCompare] = useState(false);
+  const otherStrategy: TargetStrategy = plan.data?.strategy === 'MODULAR_BY_DOMAIN' ? 'MODULAR_MONOLITH' : 'MODULAR_BY_DOMAIN';
+  const preview = useResource(() => api.previewPlan(projectId, otherStrategy),
+    compare && plan.data ? `${projectId}:${version}:${otherStrategy}` : null);
   const [error, setError] = useState<unknown>();
 
   const entries = useMemo(() => {
@@ -45,6 +51,22 @@ export function PlanPage() {
       setError(e);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const chooseStrategy = async (strategy: TargetStrategy, addModulithVerification?: boolean) => {
+    setPendingStrategy(strategy);
+    setBusy('strategy');
+    setError(undefined);
+    setDryRun(undefined);
+    try {
+      await api.changeStrategy(projectId, strategy, addModulithVerification);
+      refresh();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+      setPendingStrategy(null);
     }
   };
 
@@ -87,6 +109,28 @@ export function PlanPage() {
       </div>
 
       {error !== undefined && <ErrorPanel error={error} />}
+
+      <StrategyPicker value={pendingStrategy ?? p.strategy} disabled={busy !== null || !canTransform} onChange={(s) => chooseStrategy(s)} />
+      {p.strategy === 'MODULAR_MONOLITH' && (
+        <label className="flex items-start gap-2 rounded-lg border border-line bg-panel p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={p.modulithVerification}
+            disabled={busy !== null || !canTransform}
+            onChange={(e) => void chooseStrategy(p.strategy, e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-fg">Keep the boundaries verified with Spring Modulith</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              Adds <code className="font-mono">spring-modulith-starter-test</code> (test scope, version matched to your Spring Boot) to
+              pom.xml and a <code className="font-mono">ModularityTests</code> class, so <code className="font-mono">mvn test</code> fails
+              when a module uses another module's internals or modules depend on each other in a cycle.
+            </span>
+          </span>
+        </label>
+      )}
+
       {project?.capabilities.manualReviewRequired && (
         <div role="note" className="rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-fg">
           <strong>Manual review required.</strong> Some files stay where they are because moving them automatically is not safe. The rest of the
@@ -153,6 +197,17 @@ export function PlanPage() {
         </div>
       )}
 
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-fg">{compare ? 'Layout comparison' : 'Files'}</h2>
+        <Button size="sm" variant="ghost" aria-pressed={compare} onClick={() => setCompare((c) => !c)}>
+          {compare ? 'Back to the plan' : `Compare with ${titleCase(otherStrategy)}`}
+        </Button>
+      </div>
+      {compare && preview.error !== undefined && <ErrorPanel error={preview.error} onRetry={preview.reload} />}
+      {compare && !preview.data && preview.error === undefined && <Skeleton className="h-64" />}
+      {compare && preview.data && <LayoutComparison current={p} other={preview.data} />}
+
+      {!compare && (<>
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Filter plan entries" className="flex flex-wrap gap-1">
           {FILTERS.map((f) => (
@@ -177,6 +232,49 @@ export function PlanPage() {
         />
       </div>
       <TransformationTable entries={entries} basePackage={p.basePackage} />
+      </>)}
     </div>
+  );
+}
+
+const STRATEGIES: { value: TargetStrategy; title: string; description: string; example: string }[] = [
+  {
+    value: 'MODULAR_MONOLITH',
+    title: 'Modular monolith',
+    description:
+      'Each module gets a public API (its root package: the types other modules use) and internal sub-packages. Follows Spring Modulith conventions, so the boundaries can be verified.',
+    example: 'com.app.order.OrderService · com.app.order.repository.OrderRepository',
+  },
+  {
+    value: 'MODULAR_BY_DOMAIN',
+    title: 'Package by module',
+    description: 'Groups code by module with layer folders inside, without separating a public API from internals.',
+    example: 'com.app.modules.order.service.OrderService',
+  },
+];
+
+function StrategyPicker({ value, disabled, onChange }: { value: TargetStrategy; disabled: boolean; onChange: (s: TargetStrategy) => void }) {
+  return (
+    <fieldset className="grid grid-cols-1 gap-3 md:grid-cols-2" disabled={disabled}>
+      <legend className="mb-2 text-sm font-medium text-fg">Target architecture</legend>
+      {STRATEGIES.map((s) => (
+        <label
+          key={s.value}
+          className={cn(
+            'flex cursor-pointer gap-3 rounded-lg border p-3 text-sm',
+            value === s.value ? 'border-accent bg-accent-soft' : 'border-line bg-panel hover:bg-panel-hover',
+            disabled && 'cursor-not-allowed opacity-60',
+          )}
+        >
+          <input type="radio" name="strategy" className="mt-1" checked={value === s.value} onChange={() => onChange(s.value)} />
+          <span className="min-w-0">
+            <span className="font-medium text-fg">{s.title}</span>
+            {s.value === 'MODULAR_MONOLITH' && <Badge tone="accent" className="ml-2">default</Badge>}
+            <span className="mt-1 block text-xs text-muted">{s.description}</span>
+            <span className="mt-1 block truncate font-mono text-[11px] text-faint">{s.example}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }

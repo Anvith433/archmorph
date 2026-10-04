@@ -1,20 +1,28 @@
 package com.anvith.archmorph.security;
 
+import com.anvith.archmorph.api.web.ClientResolver;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.List;
@@ -22,11 +30,14 @@ import java.util.List;
 /**
  * HTTP security boundary, deliberately separate from the analysis code.
  *
- * <p><b>Local no-login mode:</b> every request is permitted; there are no sessions and no cookies, hence no
- * CSRF surface (CSRF protection is therefore disabled for this stateless API). When authentication is
- * added, tighten {@code authorizeHttpRequests}, use framework-provided password hashing, short-lived
- * tokens and rotating refresh tokens, and re-enable CSRF for any cookie-based flow. Nothing in the
- * analysis packages depends on this class.</p>
+ * <p><b>Local no-login mode</b> ({@code archmorph.security.auth.mode=NONE}, the default): every request is
+ * permitted; there are no sessions and no cookies, hence no CSRF token (the API is stateless).</p>
+ *
+ * <p><b>Basic mode</b> ({@code BASIC}): every request except the health check needs HTTP Basic credentials of a
+ * configured user, checked against a bcrypt hash; still stateless (no session, no cookie). Because browsers resend
+ * Basic credentials on their own, state-changing API requests must also carry {@code X-Requested-With}, and
+ * failed logins are throttled per client; see {@link AuthGuards}. Projects are visible only to the user who
+ * uploaded them ({@code OwnerAccessPolicy}). Nothing in the analysis packages depends on this class.</p>
  *
  * <p>CORS never uses {@code *}: only the configured origins are allowed and credentials are not.</p>
  */
@@ -40,16 +51,16 @@ public class WebSecurityConfiguration {
             + "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, ArchMorphProperties properties) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, ArchMorphProperties properties, ClientResolver clients,
+                                            JsonMapper json, UserDetailsService users, PasswordEncoder passwords)
+            throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(properties)))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .httpBasic(basic -> basic.disable())
                 .formLogin(form -> form.disable())
                 .logout(logout -> logout.disable())
                 .requestCache(cache -> cache.disable())
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
                 .headers(headers -> headers
                         .contentSecurityPolicy(csp -> csp.policyDirectives(CONTENT_SECURITY_POLICY))
                         .contentTypeOptions(Customizer.withDefaults())
@@ -59,6 +70,25 @@ public class WebSecurityConfiguration {
                                 "camera=(), microphone=(), geolocation=(), payment=(), usb=()"))
                         .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31_536_000))
                         .cacheControl(Customizer.withDefaults()));
+        if (properties.getSecurity().getAuth().getMode() == ArchMorphProperties.AuthMode.BASIC) {
+            AuthGuards.LoginThrottle throttle = new AuthGuards.LoginThrottle();
+            AuthGuards.EntryPoint entryPoint = new AuthGuards.EntryPoint(throttle, clients, json);
+            DaoAuthenticationProvider bcrypt = new DaoAuthenticationProvider(users);
+            bcrypt.setPasswordEncoder(passwords);
+            http
+                    .authenticationManager(new ProviderManager(new CachingAuthenticationProvider(bcrypt)))
+                    .httpBasic(basic -> basic.authenticationEntryPoint(entryPoint))
+                    .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
+                    .addFilterBefore(new AuthGuards.LoginThrottleFilter(throttle, clients, json), BasicAuthenticationFilter.class)
+                    .addFilterBefore(new AuthGuards.RequiredHeaderFilter(json), BasicAuthenticationFilter.class)
+                    .authorizeHttpRequests(auth -> auth
+                            .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                            .anyRequest().authenticated());
+        } else {
+            http
+                    .httpBasic(basic -> basic.disable())
+                    .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        }
         return http.build();
     }
 
@@ -78,13 +108,22 @@ public class WebSecurityConfiguration {
     }
 
     /**
-     * No users exist in local mode. Defining this bean stops Spring Boot from creating a default user
-     * with a generated password that would be logged at startup.
+     * Users of {@code BASIC} mode, from configuration. In local mode no users exist; defining this bean also stops
+     * Spring Boot from creating a default user with a generated password that would be logged at startup.
      */
     @Bean
-    UserDetailsService noUsers() {
-        return username -> {
-            throw new UsernameNotFoundException("Authentication is not enabled");
-        };
+    UserDetailsService users(ArchMorphProperties properties) {
+        ArchMorphProperties.Auth auth = properties.getSecurity().getAuth();
+        if (auth.getMode() != ArchMorphProperties.AuthMode.BASIC) {
+            return username -> {
+                throw new UsernameNotFoundException("Authentication is not enabled");
+            };
+        }
+        return new InMemoryUserDetailsManager(ConfiguredUsers.of(auth.getUsers()));
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 }

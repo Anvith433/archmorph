@@ -59,7 +59,7 @@ public class ProjectAnalyzer {
     public AnalysisResult analyze(Path extractedDirectory, ProgressListener progress, Deadline deadline) {
         long started = System.nanoTime();
         ProjectStructure structure = structureDetector.detect(extractedDirectory);
-        progress.onEvent(ProgressEvent.STRUCTURE_DETECTED, "Maven project detected");
+        progress.onEvent(ProgressEvent.STRUCTURE_DETECTED, describe(structure));
         deadline.check();
 
         progress.onEvent(ProgressEvent.PARSING_STARTED, "Parsing Java sources");
@@ -90,5 +90,18 @@ public class ProjectAnalyzer {
         log.info("Analysis finished in {} ms: {} classes, {} modules", millis, built.graph().getNodeCount(),
                 suggestion.getBusinessModuleCount());
         return new AnalysisResult(model, built.graph(), built.statistics(), architecture, cycles, suggestion, facts, millis);
+    }
+
+    private static String describe(ProjectStructure structure) {
+        String tool = switch (structure.buildTool()) {
+            case MAVEN -> "Maven";
+            case GRADLE -> "Gradle";
+            case NONE -> "Java";
+        };
+        if (!structure.multiModule()) {
+            return tool + " project detected";
+        }
+        return tool + " project with " + structure.mavenModules().size()
+                + (structure.buildTool() == ProjectStructure.BuildTool.GRADLE ? " subprojects" : " modules") + " detected";
     }
 }

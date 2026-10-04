@@ -8,7 +8,7 @@
     "com.demo.config.SecurityConfig": "com.demo.shared.security.SecurityConfig",
     "com.demo.security.JwtAuthenticationFilter": "com.demo.shared.security.JwtAuthenticationFilter",
     "com.demo.security.JwtTokenProvider": "com.demo.shared.security.JwtTokenProvider",
-    "com.demo.security.UserDetailsServiceImpl": "com.demo.shared.security.UserDetailsServiceImpl",
+    "com.demo.security.UserDetailsServiceImpl": "com.demo.UserDetailsServiceImpl",
     "com.demo.controller.AuthController": "com.demo.modules.auth.controller.AuthController",
     "com.demo.dto.LoginRequest": "com.demo.modules.auth.dto.LoginRequest",
     "com.demo.service.UserService": "com.demo.modules.user.service.UserService"
@@ -19,8 +19,7 @@
   "sharedClasses": [
     "com.demo.config.SecurityConfig",
     "com.demo.security.JwtAuthenticationFilter",
-    "com.demo.security.JwtTokenProvider",
-    "com.demo.security.UserDetailsServiceImpl"
+    "com.demo.security.JwtTokenProvider"
   ],
   "manualReview": [],
   "conflicts": [],

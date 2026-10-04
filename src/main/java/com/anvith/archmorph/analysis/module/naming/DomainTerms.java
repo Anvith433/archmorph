@@ -19,19 +19,42 @@ public final class DomainTerms {
     private DomainTerms() {
     }
 
-    /** Role suffixes, longest first so "ServiceImpl" wins over "Impl". */
-    private static final List<String> ROLE_SUFFIXES = List.of(
+    /** Role suffixes; matched longest first so "ServiceImpl" wins over "Impl" and "RowMapper" over "Mapper". */
+    private static final List<String> ROLE_SUFFIXES = longestFirst(
             "RestController", "Controller", "Resource", "Endpoint", "ServiceImpl", "Service", "Impl",
             "Repository", "Repo", "Dao", "DAO", "Entity", "Dto", "DTO", "Request", "Response", "Payload",
             "Form", "Command", "Query", "View", "Model", "Mapper", "Converter", "Assembler", "Exception",
             "Validator", "Facade", "Manager", "Handler", "Listener", "Event", "Specification", "Spec",
             "Projection", "Summary", "Details", "Detail", "Info", "Data", "Client", "Gateway", "Adapter",
             "Factory", "Builder", "Helper", "Utils", "Util", "Config", "Configuration", "Properties",
-            "Status", "Type", "Test", "Tests", "IT");
+            "Status", "Type", "Test", "Tests", "IT", "RowMapper", "ResultSetExtractor", "Extractor", "Override",
+            "Custom", "Advice", "Aspect", "Api", "Initializer", "Loader", "Runner", "Scheduler",
+            // GraphQL
+            "DataFetcher", "Datafetcher", "Fetcher", "Mutation", "Resolver", "Subscription",
+            "Serializer", "Deserializer", "Codec",
+            // view models (JHipster LoginVM, ManagedUserVM)
+            "VM", "Vm", "ViewModel");
+
+    private static List<String> longestFirst(String... values) {
+        return java.util.Arrays.stream(values)
+                .sorted(java.util.Comparator.comparingInt(String::length).reversed().thenComparing(v -> v))
+                .toList();
+    }
+
+    /**
+     * Technology and implementation-variant prefixes: {@code JdbcPetRepositoryImpl}, {@code SpringDataOwnerRepository}
+     * and {@code JpaVisitRepositoryImpl} belong to the pet, owner and visit domains, not to "jdbcpet".
+     */
+    private static final List<String> TECHNOLOGY_PREFIXES = List.of(
+            "SpringData", "Jdbc", "Jpa", "Jdbi", "Jooq", "MyBatis", "Mybatis", "Hibernate", "Mongo", "Redis", "Elastic",
+            "Cassandra", "Neo4j", "R2dbc", "Kafka", "Rabbit", "Jms", "Rest", "Http", "Grpc", "GraphQL", "GraphQl", "Graphql", "Soap",
+            "Feign", "Cached", "Caching", "InMemory", "Mock", "Fake", "Stub");
 
     private static final List<String> VERB_PREFIXES = List.of(
             "Create", "Update", "Delete", "Get", "List", "Find", "Search", "Add", "Remove", "Patch", "Save",
-            "New", "Edit", "Register", "Upsert", "Default", "Abstract", "Base", "Simple", "Paged", "Page");
+            "New", "Edit", "Register", "Upsert", "Default", "Abstract", "Base", "Simple", "Paged", "Page",
+            // qualifiers: CurrentUserApi and MeController are about the user, not a "currentuser" domain
+            "Current", "My", "Me");
 
     /** Terms that never name a business module. */
     public static final Set<String> GENERIC_TERMS = Set.copyOf(List.of(
@@ -40,12 +63,15 @@ public final class DomainTerms {
             "request", "page", "result", "message", "constants", "constant", "config", "custom", "my", "impl",
             "v1", "v2", "v3", "rest", "public", "internal", "entity", "dto", "model", "data", "info",
             "resource", "not", "found", "bad", "invalid", "already", "exists", "exist", "unauthorized",
-            "forbidden", "conflict", "validation",
+            "forbidden", "conflict", "validation", "binding", "root", "named", "jdbc", "jpa",
             // role words that name a technical function, not a business domain
             "processor", "manager", "handler", "provider", "factory", "builder", "service", "controller",
             "repository", "facade", "adapter", "listener", "validator", "converter", "mapper", "client",
             "gateway", "task", "job", "worker", "runner", "component", "bean", "context", "registry",
-            "strategy", "wrapper", "helper", "foo", "bar", "baz", "main", "type", "status"));
+            "strategy", "wrapper", "helper", "foo", "bar", "baz", "main", "type", "status",
+            // cross-cutting technical concerns
+            "security", "authentication", "authorization", "field", "cursor", "pager", "me", "customize", "customized",
+            "authenticate", "login", "logout", "logging", "log", "meter", "metric", "vm"));
 
     /** Domain stem of a class name: role suffixes and verb prefixes removed, lower case. */
     public static String stem(String className) {
@@ -58,6 +84,18 @@ public final class DomainTerms {
             return List.of();
         }
         String name = className;
+        // OwnerRestControllerV2 → OwnerRestController
+        String unversioned = name.replaceFirst("V\\d+$", "");
+        if (!unversioned.isEmpty() && !unversioned.equals(name) && Character.isLowerCase(unversioned.charAt(unversioned.length() - 1))) {
+            name = unversioned;
+        }
+        for (String prefix : TECHNOLOGY_PREFIXES) {
+            if (name.startsWith(prefix) && name.length() > prefix.length()
+                    && Character.isUpperCase(name.charAt(prefix.length()))) {
+                name = name.substring(prefix.length());
+                break;
+            }
+        }
         boolean stripped = true;
         while (stripped) {
             stripped = false;

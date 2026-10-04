@@ -25,11 +25,14 @@ export function ModuleCard({
   moduleNames,
   editable,
   onEdit,
+  showExposure = false,
 }: {
   module: Module;
   moduleNames: string[];
   editable: boolean;
   onEdit: (edit: ModuleEdit) => void;
+  /** MODULAR_MONOLITH layout: show and edit whether each class is part of the module's public API. */
+  showExposure?: boolean;
 }) {
   const [dropping, setDropping] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -160,6 +163,7 @@ export function ModuleCard({
             targets={others}
             editable={editable}
             onEdit={onEdit}
+            showExposure={showExposure && module.category !== 'APPLICATION'}
             splitting={splitting}
             splitChecked={splitClasses.has(c.qualifiedName)}
             onSplitToggle={() =>
@@ -184,12 +188,13 @@ export function ModuleCard({
   );
 }
 
-function ClassRow({ item, moduleName, targets, editable, onEdit, splitting, splitChecked, onSplitToggle }: {
+function ClassRow({ item, moduleName, targets, editable, onEdit, showExposure, splitting, splitChecked, onSplitToggle }: {
   item: ModuleClass;
   moduleName: string;
   targets: string[];
   editable: boolean;
   onEdit: (edit: ModuleEdit) => void;
+  showExposure: boolean;
   splitting: boolean;
   splitChecked: boolean;
   onSplitToggle: () => void;
@@ -202,19 +207,20 @@ function ClassRow({ item, moduleName, targets, editable, onEdit, splitting, spli
         e.dataTransfer.setData(DRAG_MIME, item.qualifiedName);
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={cn('group flex items-center gap-2 px-3 py-1.5 text-xs', item.excluded && 'opacity-50')}
+      className={cn('group flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-xs', item.excluded && 'opacity-50')}
     >
       {splitting ? (
         <input type="checkbox" checked={splitChecked} onChange={onSplitToggle} aria-label={`Include ${item.className} in the split`} />
       ) : (
         <GripVertical className={cn('h-3.5 w-3.5 shrink-0', movable ? 'cursor-grab text-faint' : 'text-transparent')} aria-hidden />
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-40">
         <p className="flex min-w-0 items-baseline gap-1.5">
           <span className="truncate font-mono text-fg" title={item.qualifiedName}>{item.className}</span>
           <span className="shrink-0 text-faint">{item.componentType.toLowerCase()}</span>
         </p>
         <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-faint">
+          {showExposure && item.exposure === 'PUBLIC_API' && <Badge tone="info" title="In the module root package: other modules may use it">API</Badge>}
           {item.origin === 'USER' && <Badge tone="accent">your decision</Badge>}
           {item.locked && <Badge>locked</Badge>}
           {item.excluded && <Badge tone="warn">excluded</Badge>}
@@ -223,7 +229,7 @@ function ClassRow({ item, moduleName, targets, editable, onEdit, splitting, spli
       </div>
       <span className="font-mono text-[11px] tabular-nums text-faint" title="Assignment confidence">{Math.round(item.confidence * 100)}%</span>
       {editable && (
-        <span className="flex items-center gap-1 opacity-70 group-focus-within:opacity-100 group-hover:opacity-100">
+        <span className="ml-auto flex shrink-0 items-center gap-1 opacity-70 group-focus-within:opacity-100 group-hover:opacity-100">
           {movable && (
             <select
               aria-label={`Move ${item.className} to module`}
@@ -237,6 +243,25 @@ function ClassRow({ item, moduleName, targets, editable, onEdit, splitting, spli
             >
               <option value="">Move to…</option>
               {targets.filter((t) => t !== 'application').map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+          {showExposure && (
+            <select
+              aria-label={`Module API visibility of ${item.className}`}
+              value={item.exposureOverride ?? ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                onEdit({
+                  type: value === 'PUBLIC_API' ? 'EXPOSE_CLASS' : value === 'INTERNAL' ? 'INTERNAL_CLASS' : 'AUTO_EXPOSURE',
+                  className: item.qualifiedName,
+                });
+              }}
+              className="h-6 w-20 rounded border border-line bg-sunken px-1 text-[11px] text-fg"
+              title="Automatic: public API exactly when another module uses the class"
+            >
+              <option value="">API: auto</option>
+              <option value="PUBLIC_API">Public API</option>
+              <option value="INTERNAL">Internal</option>
             </select>
           )}
           {movable && moduleName !== 'shared' && (

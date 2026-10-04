@@ -18,6 +18,11 @@ On failure `success` is `false`, `data` is absent, `errorCode` is a stable machi
 present) tells the user what to do. Messages never contain file-system paths, stack traces or internal class
 names. Every response carries `X-Request-Id`.
 
+**Authentication.** Off by default. With `archmorph.security.auth.mode=BASIC` every request except
+`/actuator/health` needs HTTP Basic credentials (`401` with `WWW-Authenticate: Basic` otherwise), requests that
+change state (`POST`, `PUT`, `DELETE`) must also send `X-Requested-With: XMLHttpRequest` (`403` otherwise), and a
+project is only visible to the user who uploaded it (`404` for everyone else).
+
 Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed identifiers are rejected with
 `400 INVALID_REQUEST`. Long-running operations return `202 Accepted` with a `jobId`; poll the job.
 
@@ -35,7 +40,10 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/architecture` | current layers/packages vs proposed layout | `200` |
 | `GET` | `/projects/{projectId}/modules` | suggestion, user decisions, final modules | `200` |
 | `PUT` | `/projects/{projectId}/modules` | replace the list of user decisions; re-plans | `200` modules |
-| `GET` | `/projects/{projectId}/plan` | transformation plan | `200` |
+| `PUT` | `/projects/{projectId}/strategy` | choose the target layout `{"strategy": "MODULAR_MONOLITH" \| "MODULAR_BY_DOMAIN", "addModulithVerification": true}` (the flag is optional); re-plans | `200` plan |
+| `GET` | `/projects/{projectId}/plan` | transformation plan; `?strategy=MODULAR_BY_DOMAIN` previews another layout without changing anything | `200` |
+| `GET` | `/projects/{projectId}/decisions` | the review as a portable file: `{version, strategy, addModulithVerification, edits}` | `200` |
+| `PUT` | `/projects/{projectId}/decisions` | apply a saved review in one step (all or nothing) | `200` |
 | `GET` | `/projects/{projectId}/diff/{entryId}` | before/after and unified diff for one plan entry | `200` |
 | `POST` | `/projects/{projectId}/transform?dryRun=true` | rewrite everything in memory; nothing written | `200` |
 | `POST` | `/projects/{projectId}/transform` | transform, then validate (job) | `202` |
@@ -43,6 +51,9 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/validation` | validation report | `200` |
 | `GET` | `/projects/{projectId}/download` | transformed project as ZIP | `200 application/zip` |
 | `GET` | `/projects/{projectId}/reports/{name}` | one report file | `200` |
+
+The downloaded project contains `MODULES.md` (module map, public APIs, dependencies, Spring Modulith
+verification test).
 
 Report names: `analysis.json`, `analysis.md`, `modules.json`, `transformation-plan.json`,
 `transformation-summary.md`, `validation.json`, `validation-report.md`.
@@ -121,10 +132,17 @@ rejects the whole request (`400 INVALID_MODULE_OPERATION`) if any decision is in
 ] }
 ```
 
-Also `INCLUDE_CLASS` and `UNLOCK_CLASS`. Module names must be lower-case Java identifiers and must not be
+Also `INCLUDE_CLASS` and `UNLOCK_CLASS`, and for the modular-monolith layout `EXPOSE_CLASS` (always in the
+module's public API), `INTERNAL_CLASS` (always internal — rejected while another module uses the class, naming
+the users) and `AUTO_EXPOSURE` (back to automatic). Module classes carry `exposure` (`PUBLIC_API`/`INTERNAL`)
+and `exposureOverride`. Module names must be lower-case Java identifiers and must not be
 reserved (`shared`, `config`, …). Limits: 500 edits, 300-character class names.
 
-Response: `{ suggestion: Module[], decisions: Edit[], finalModules: Module[], warnings: string[], note }` with
+Response: `{ suggestion: Module[], decisions: Edit[], finalModules: Module[], warnings: string[], note, cycles: string[][],
+boundarySuggestions: BoundarySuggestion[] }`. A boundary suggestion is
+`{ id, kind (MOVE_CLASS | SPLIT_FACADE | UNIDIRECTIONAL_RELATIONSHIP | INVERT_DEPENDENCY), from, to, subject, title,
+rationale, dependencyCount, steps[], evidence[], edit }`; `edit` is set for `MOVE_CLASS` and can be appended to
+the decision list to apply it. A module looks like
 
 ```json
 { "name": "order", "category": "BUSINESS_MODULE", "confidence": 0.79, "cohesion": 0.56, "externalCoupling": 0.35,
@@ -146,19 +164,21 @@ Categories: `BUSINESS_MODULE`, `SHARED`, `INFRASTRUCTURE`, `CONFIGURATION`, `SEC
 {
   "id": "e-0019", "scope": "MAIN", "className": "OrderService",
   "sourcePath": "src/main/java/com/demo/service/OrderService.java",
-  "targetPath": "src/main/java/com/demo/modules/order/service/OrderService.java",
-  "sourcePackage": "com.demo.service", "targetPackage": "com.demo.modules.order.service",
+  "targetPath": "src/main/java/com/demo/order/OrderService.java",
+  "sourcePackage": "com.demo.service", "targetPackage": "com.demo.order",
   "module": "order", "folder": "service",
   "actions": ["MOVE", "REWRITE_IMPORT", "REWRITE_PACKAGE", "REWRITE_QUALIFIED_REFERENCE"],
   "safety": "SAFE", "risk": "LOW", "confidence": 0.9,
-  "rewrites": ["rewrite package com.demo.service → com.demo.modules.order.service",
+  "rewrites": ["rewrite package com.demo.service → com.demo.order",
                "update imports (3 project types affected)", "rewrite 2 fully-qualified reference(s)"],
   "reasons": [],
-  "classes": [ { "source": "com.demo.service.OrderService", "target": "com.demo.modules.order.service.OrderService", "nested": false } ]
+  "classes": [ { "source": "com.demo.service.OrderService", "target": "com.demo.order.OrderService", "nested": false } ]
 }
 ```
 
-The plan adds `strategy`, `basePackage`, `fingerprint`, `summary` (files, moved, kept, excluded, manualReview,
+With the default `MODULAR_MONOLITH` strategy `OrderService` lands in the module root `com.demo.order`
+because another module (payment) uses it; a class used only inside its module would land in
+`com.demo.order.service`. The plan adds `strategy`, `basePackage`, `fingerprint`, `summary` (files, moved, kept, excluded, manualReview,
 unsupported, safe, safeWithWarning, conflicts, rewrites), `conflicts` (`{type, target, sources, resolution}`),
 `warnings`, `resourceFindings` (`{file, line, reference, snippet}`), `layout` and `classMap`.
 
@@ -176,7 +196,7 @@ unsupported, safe, safeWithWarning, conflicts, rewrites), `conflicts` (`{type, t
       "issues": [ { "severity": "WARNING", "file": "src/main/java/com/demo/shared/exception/GlobalExceptionHandler.java", "line": 14,
                     "message": "Shared class GlobalExceptionHandler depends on module 'user' (UserNotFoundException).",
                     "probableCause": "Shared code should not depend on a business module; consider an interface in shared or moving the class." } ] },
-    { "level": "BUILD", "label": "Maven Build", "status": "PASS", "summary": "mvn -B -q -DskipTests test-compile succeeded in 2.648 s", "…": "…" }
+    { "level": "BUILD", "label": "Build", "status": "PASS", "summary": "mvn -B -q -DskipTests test-compile succeeded in 2.648 s", "…": "…" }
   ],
   "build": { "command": ["mvn", "-B", "-q", "-DskipTests", "test-compile"], "exitCode": 0,
              "stdout": "", "stderr": "", "durationMillis": 2648, "timedOut": false, "truncated": false }
@@ -192,13 +212,15 @@ Level and overall status: `PASS`, `WARN`, `FAIL`, `SKIPPED`.
 | 400 | `INVALID_REQUEST` | malformed identifier, missing file, bad JSON, validation failure |
 | 400 | `INVALID_ARCHIVE` / `UNSAFE_ARCHIVE_ENTRY` | not a ZIP; traversal, absolute path, symlink, duplicate entry |
 | 400 | `INVALID_MODULE_OPERATION` | a module decision cannot be applied |
-| 404 | `PROJECT_NOT_FOUND` / `JOB_NOT_FOUND` / `RESOURCE_NOT_FOUND` | unknown or expired ID, report not yet produced |
+| 401 | `UNAUTHORIZED` | login enabled and no or wrong credentials |
+| 403 | `INVALID_REQUEST` | login enabled and a state-changing request without `X-Requested-With` |
+| 404 | `PROJECT_NOT_FOUND` / `JOB_NOT_FOUND` / `RESOURCE_NOT_FOUND` | unknown or expired ID, another user's project, report not yet produced |
 | 409 | `INVALID_STATE` | e.g. transform before analysis finished, download before transformation |
 | 413 | `ARCHIVE_TOO_LARGE` | upload above `max-archive-size` |
 | 422 | `ARCHIVE_LIMIT_EXCEEDED` | entry count, entry size, total size or compression ratio exceeded |
 | 422 | `INVALID_PROJECT_STRUCTURE` / `SOURCE_NOT_FOUND` / `JAVA_PARSE_ERROR` | unsupported build tool, no Java sources, … |
 | 422 | `ANALYSIS_LIMIT_EXCEEDED` / `TIMEOUT` | too many files, analysis deadline exceeded |
-| 429 | `RATE_LIMITED` / `TOO_MANY_JOBS` | rate limit or job quota; see `Retry-After` |
+| 429 | `RATE_LIMITED` / `TOO_MANY_JOBS` | rate limit, job quota or too many failed logins; see `Retry-After` |
 | 500 | `WORKSPACE_ERROR` / `STORAGE_ERROR` / `EXTRACTION_ERROR` / `TRANSFORMATION_ERROR` / `INTERNAL_ERROR` | server-side failure; quote the `requestId` |
 
 Example:
@@ -213,7 +235,7 @@ Example:
 ## Rate limits
 
 Per client and minute (configurable under `archmorph.security.rate-limit.*`): uploads 10, expensive
-operations (analyze, transform, validate, module edits) 30, downloads 60, everything else 600. Exceeding a
+operations (analyze, transform, validate, module edits, strategy changes) 30, downloads 60, everything else 600. Exceeding a
 budget returns `429` with `Retry-After`.
 
 ## Session

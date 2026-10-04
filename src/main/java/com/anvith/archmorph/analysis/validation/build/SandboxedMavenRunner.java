@@ -7,16 +7,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Runs an <em>allowlisted</em> Maven command in a controlled child process.
@@ -59,22 +55,17 @@ public class SandboxedMavenRunner {
     }
 
     public boolean mavenAvailable() {
-        return resolveExecutable(properties.getValidation().getBuild().getMavenExecutable()) != null;
+        return SandboxedProcess.resolveExecutable(properties.getValidation().getBuild().getMavenExecutable()) != null;
     }
 
     public BuildResult run(Path projectDir, Path buildHome, Path localRepository, Goal goal) throws IOException {
         ArchMorphProperties.Build config = properties.getValidation().getBuild();
-        Path executable = resolveExecutable(config.getMavenExecutable());
+        Path executable = SandboxedProcess.resolveExecutable(config.getMavenExecutable());
         if (executable == null) {
             throw new IOException("Maven executable not found");
         }
 
-        List<String> command = new ArrayList<>();
-        Path prlimit = findOnPath("prlimit");
-        if (prlimit != null) {
-            long cpuSeconds = Math.max(60, config.getTimeout().toSeconds() * 2);
-            command.addAll(List.of(prlimit.toString(), "--cpu=" + cpuSeconds, "--fsize=" + (2L << 30), "--"));
-        }
+        List<String> command = new ArrayList<>(SandboxedProcess.limits(config.getTimeout()));
         command.add(executable.toString());
         command.add("-B");
         command.add("--no-transfer-progress");
@@ -89,53 +80,31 @@ public class SandboxedMavenRunner {
         command.add(goal.maven);
 
         Files.createDirectories(buildHome);
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(projectDir.toFile())
-                .redirectErrorStream(false);
-        builder.environment().clear();
-        builder.environment().putAll(sandboxEnvironment(config, buildHome));
-
-        long started = System.nanoTime();
-        Process process = builder.start();
-        process.getOutputStream().close();
-
-        StringBuilder out = new StringBuilder();
-        StringBuilder err = new StringBuilder();
-        AtomicBoolean truncated = new AtomicBoolean();
-        Thread outReader = reader(process.getInputStream(), out, config.getMaxOutputChars(), truncated);
-        Thread errReader = reader(process.getErrorStream(), err, config.getMaxOutputChars(), truncated);
-
-        boolean finished;
-        try {
-            finished = process.waitFor(config.getTimeout().toMillis(), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            finished = false;
-        }
-        boolean timedOut = !finished;
-        if (timedOut) {
-            killTree(process);
-        }
-        try {
-            outReader.join(2000);
-            errReader.join(2000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        int exit = timedOut ? -1 : process.exitValue();
-        long millis = (System.nanoTime() - started) / 1_000_000;
-        log.info("Maven {} finished with exit code {} in {} ms{}", goal.maven, exit, millis, timedOut ? " (timed out)" : "");
+        SandboxedProcess.Execution execution = SandboxedProcess.execute(command, projectDir,
+                sandboxEnvironment(config, buildHome), config.getTimeout(), config.getMaxOutputChars());
+        log.info("Maven {} finished with exit code {} in {} ms{}", goal.maven, execution.exitCode(), execution.durationMillis(),
+                execution.timedOut() ? " (timed out)" : "");
 
         List<String> shown = new ArrayList<>(List.of("mvn", "-B", "-q"));
         if (goal != Goal.TEST) {
             shown.add("-DskipTests");
         }
         shown.add(goal.maven);
-        return new BuildResult(shown, exit,
-                sanitize(out.toString(), projectDir, buildHome, localRepository),
-                sanitize(err.toString(), projectDir, buildHome, localRepository),
-                millis, timedOut, truncated.get());
+        Map<String, String> masks = masks(projectDir, buildHome, localRepository);
+        return new BuildResult(shown, execution.exitCode(),
+                SandboxedProcess.mask(execution.stdout(), masks, config.getMaxOutputChars()),
+                SandboxedProcess.mask(execution.stderr(), masks, config.getMaxOutputChars()),
+                execution.durationMillis(), execution.timedOut(), execution.truncated());
+    }
+
+    static Map<String, String> masks(Path projectDir, Path buildHome, Path cache) {
+        Map<String, String> masks = new LinkedHashMap<>();
+        masks.put(projectDir.toAbsolutePath().toString(), "<project>");
+        masks.put(buildHome.toAbsolutePath().toString(), "<home>");
+        masks.put(cache.toAbsolutePath().toString(), "<repo>");
+        masks.put(System.getProperty("java.home"), "<java>");
+        masks.put(System.getProperty("user.home"), "~");
+        return masks;
     }
 
     private Map<String, String> sandboxEnvironment(ArchMorphProperties.Build config, Path buildHome) {
@@ -153,75 +122,5 @@ public class SandboxedMavenRunner {
             }
         }
         return env;
-    }
-
-    private Thread reader(InputStream stream, StringBuilder sink, int max, AtomicBoolean truncated) {
-        Thread thread = new Thread(() -> {
-            byte[] buffer = new byte[8192];
-            try (InputStream in = stream) {
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    synchronized (sink) {
-                        if (sink.length() < max) {
-                            sink.append(new String(buffer, 0, read, StandardCharsets.UTF_8));
-                        } else {
-                            truncated.set(true);
-                        }
-                    }
-                }
-            } catch (IOException ignored) {
-                // stream closed by process termination
-            }
-        }, "archmorph-build-output");
-        thread.setDaemon(true);
-        thread.start();
-        return thread;
-    }
-
-    private void killTree(Process process) {
-        process.descendants().forEach(ProcessHandle::destroyForcibly);
-        process.destroyForcibly();
-    }
-
-    private String sanitize(String text, Path projectDir, Path buildHome, Path repo) {
-        String result = text;
-        result = replaceAll(result, projectDir.toAbsolutePath().toString(), "<project>");
-        result = replaceAll(result, buildHome.toAbsolutePath().toString(), "<home>");
-        result = replaceAll(result, repo.toAbsolutePath().toString(), "<repo>");
-        result = replaceAll(result, System.getProperty("java.home"), "<java>");
-        result = replaceAll(result, System.getProperty("user.home"), "~");
-        if (result.length() > properties.getValidation().getBuild().getMaxOutputChars()) {
-            result = result.substring(0, properties.getValidation().getBuild().getMaxOutputChars());
-        }
-        return result;
-    }
-
-    private static String replaceAll(String text, String needle, String replacement) {
-        return needle == null || needle.isBlank() || needle.length() < 2 ? text : text.replace(needle, replacement);
-    }
-
-    private Path resolveExecutable(String configured) {
-        if (configured == null || configured.isBlank() || !configured.matches("[A-Za-z0-9_./\\\\:-]+")) {
-            return null;
-        }
-        Path candidate = Path.of(configured);
-        if (candidate.isAbsolute()) {
-            return Files.isExecutable(candidate) ? candidate : null;
-        }
-        return findOnPath(configured);
-    }
-
-    private Path findOnPath(String name) {
-        String path = System.getenv("PATH");
-        if (path == null) {
-            return null;
-        }
-        for (String directory : path.split(java.io.File.pathSeparator)) {
-            Path candidate = Path.of(directory).resolve(name);
-            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
     }
 }

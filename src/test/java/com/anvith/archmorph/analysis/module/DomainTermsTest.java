@@ -25,6 +25,24 @@ class DomainTermsTest {
     }
 
     @Test
+    void graphQlRolesQualifiersAndCrossCuttingConcernsAreNotDomains() {
+        assertThat(DomainTerms.stem("ArticleDatafetcher")).isEqualTo("article");
+        assertThat(DomainTerms.stem("CommentMutation")).isEqualTo("comment");
+        assertThat(DomainTerms.stem("GraphQLCustomizeExceptionHandler")).isEqualTo("customize");
+        assertThat(DomainTerms.isGenericName("GraphQLCustomizeExceptionHandler")).isTrue();
+        assertThat(DomainTerms.stem("CurrentUserApi")).isEqualTo("user");
+        assertThat(DomainTerms.stem("ErrorResourceSerializer")).isEqualTo("error");
+        assertThat(DomainTerms.isGenericName("SecurityUtil")).isTrue();
+        assertThat(DomainTerms.isGenericName("FieldErrorResource")).isTrue();
+        assertThat(DomainTerms.isGenericName("AuthorizationService")).isTrue();
+        assertThat(DomainTerms.stem("ManagedUserVM")).isEqualTo("manageduser");
+        assertThat(DomainTerms.isGenericName("LoginVM")).isTrue();
+        assertThat(DomainTerms.isGenericName("SecurityMetersService")).isTrue();
+        assertThat(DomainTerms.isGenericName("LoggingAspect")).isTrue();
+        assertThat(DomainTerms.stem("MessageService")).as("'Me' is only a prefix before a capital").isEqualTo("message");
+    }
+
+    @Test
     void pathTermsIgnoreVersionsAndVariables() {
         assertThat(DomainTerms.pathTerms("/api/v1/order-items/{id}")).containsExactly("orderitem");
     }
@@ -33,5 +51,18 @@ class DomainTermsTest {
     void tokenSimilarityRewardsSharedPrefixes() {
         assertThat(DomainTerms.tokenSimilarity(DomainTerms.tokens("Order"), DomainTerms.tokens("OrderItem"))).isGreaterThanOrEqualTo(0.6);
         assertThat(DomainTerms.tokenSimilarity(DomainTerms.tokens("User"), DomainTerms.tokens("Payment"))).isZero();
+    }
+
+    @Test
+    void technologyPrefixesAndApiVersionsAreNotDomains() {
+        assertThat(DomainTerms.stem("JdbcPetRepositoryImpl")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("SpringDataOwnerRepository")).isEqualTo("owner");
+        assertThat(DomainTerms.stem("JpaVisitRepositoryImpl")).isEqualTo("visit");
+        assertThat(DomainTerms.stem("JdbcPetRowMapper")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("PetTypeRepositoryOverride")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("OwnerRestControllerV2")).isEqualTo("owner");
+        // a prefix only counts as a whole word
+        assertThat(DomainTerms.stem("RestaurantService")).isEqualTo("restaurant");
+        assertThat(DomainTerms.stem("MockingbirdController")).isEqualTo("mockingbird");
     }
 }

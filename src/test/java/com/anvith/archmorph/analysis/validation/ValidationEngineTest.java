@@ -81,11 +81,11 @@ class ValidationEngineTest {
 
     @Test
     void sharedCodeDependingOnAModuleIsAnArchitectureWarning() throws Exception {
-        ValidationReport report = tamper(root -> { });
+        ValidationReport report = tamper(root -> replace(root.resolve("src/main/java/com/demo/shared/common/ApiResponse.java"),
+                "public class ApiResponse<T> {", "public class ApiResponse<T> {\n    private com.demo.modules.user.entity.User lastUser;"));
         LevelResult architecture = level(report, ValidationLevel.ARCHITECTURE_RULES);
         assertThat(architecture.status()).isEqualTo(ValidationStatus.WARN);
-        assertThat(architecture.issues()).singleElement()
-                .satisfies(i -> assertThat(i.message()).contains("GlobalExceptionHandler").contains("user"));
+        assertThat(architecture.issues()).anySatisfy(i -> assertThat(i.message()).contains("ApiResponse").contains("user"));
     }
 
     private static void delete(Path file) {

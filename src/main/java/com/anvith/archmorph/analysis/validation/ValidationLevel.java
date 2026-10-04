@@ -8,7 +8,7 @@ public enum ValidationLevel {
     IMPORT_RESOLUTION("Import Resolution"),
     DEPENDENCY_GRAPH("Dependency Graph"),
     ARCHITECTURE_RULES("Architecture Rules"),
-    BUILD("Maven Build");
+    BUILD("Build");
 
     private final String label;
 

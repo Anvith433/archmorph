@@ -32,6 +32,7 @@ import com.anvith.archmorph.upload.service.ZipExtractionService;
 import com.anvith.archmorph.workspace.WorkspaceManager;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
@@ -46,7 +47,6 @@ import java.util.concurrent.locks.ReentrantLock;
 @Service
 public class ProjectWorkflow {
 
-    private static final TargetStrategy STRATEGY = TargetStrategy.MODULAR_BY_DOMAIN;
     private static final int MAX_DIFF_CHARS = 400_000;
 
     private final ZipExtractionService extractor;
@@ -58,11 +58,19 @@ public class ProjectWorkflow {
     private final ReportService reports;
     private final SourceRewriter rewriter;
     private final DiffService diffService;
+    private final com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures;
+    private final com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation;
+    private final com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor;
+    private final com.anvith.archmorph.analysis.transformation.build.ModulithSetup modulithSetup;
     private final ArchMorphProperties properties;
 
     public ProjectWorkflow(ZipExtractionService extractor, ProjectAnalyzer analyzer, ModuleEditService editService,
                            TransformationPlanner planner, TransformationEngine engine, ValidationEngine validationEngine,
                            ReportService reports, SourceRewriter rewriter, DiffService diffService,
+                           com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures,
+                           com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation,
+                           com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor,
+                           com.anvith.archmorph.analysis.transformation.build.ModulithSetup modulithSetup,
                            ArchMorphProperties properties) {
         this.extractor = extractor;
         this.analyzer = analyzer;
@@ -73,6 +81,10 @@ public class ProjectWorkflow {
         this.reports = reports;
         this.rewriter = rewriter;
         this.diffService = diffService;
+        this.architectures = architectures;
+        this.moduleDocumentation = moduleDocumentation;
+        this.boundaryAdvisor = boundaryAdvisor;
+        this.modulithSetup = modulithSetup;
         this.properties = properties;
     }
 
@@ -133,13 +145,153 @@ public class ProjectWorkflow {
             session.setDecisions(edits);
             session.setFinalModules(result);
             invalidateTransformation(session);
-            session.setPlan(planner.plan(session.analysis().model(), session.analysis().graph(), result, STRATEGY));
+            session.setPlan(withOptions(session, planner.plan(session.analysis().model(), session.analysis().graph(), result,
+                    strategyOf(session))));
             reports.writePlan(session);
             session.setStatus(ProjectStatus.READY_FOR_REVIEW);
             return result;
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * Apply a saved review in one step: target layout, Spring Modulith option and module edits. Nothing changes when
+     * any edit is invalid.
+     */
+    public ModuleDiscoveryReport applyDecisions(ProjectSession session, TargetStrategy strategy, Boolean modulithVerification,
+                                                List<ModuleEdit> edits) {
+        ReentrantLock lock = session.lock();
+        lock.lock();
+        try {
+            requireAnalysis(session);
+            editService.apply(session.analysis().suggestion(), edits, session.analysis().graph()); // validate first
+            if (strategy != null) {
+                session.setStrategy(strategy);
+            }
+            if (modulithVerification != null) {
+                session.setModulithVerification(modulithVerification);
+            }
+            return updateModules(session, edits);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Plan for another layout from the current decisions, without changing the project. */
+    public TransformationPlan previewPlan(ProjectSession session, TargetStrategy strategy) {
+        session.lock().lock();
+        try {
+            requireAnalysis(session);
+            ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+            return planner.plan(session.analysis().model(), session.analysis().graph(), modules, strategy);
+        } finally {
+            session.lock().unlock();
+        }
+    }
+
+    public boolean modulithVerificationOf(ProjectSession session) {
+        return session.modulithVerification() != null ? session.modulithVerification()
+                : properties.getTransformation().isAddModulithVerification();
+    }
+
+    /** Choose the target layout and re-plan. A completed transformation is invalidated. */
+    public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy) {
+        return changeStrategy(session, strategy, null);
+    }
+
+    /** @param modulithVerification add Spring Modulith verification; null keeps the current choice */
+    public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy, Boolean modulithVerification) {
+        ReentrantLock lock = session.lock();
+        lock.lock();
+        try {
+            requireAnalysis(session);
+            session.setStrategy(strategy);
+            if (modulithVerification != null) {
+                session.setModulithVerification(modulithVerification);
+            }
+            invalidateTransformation(session);
+            ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+            TransformationPlan plan = withOptions(session, planner.plan(session.analysis().model(), session.analysis().graph(),
+                    modules, strategy));
+            session.setPlan(plan);
+            reports.writePlan(session);
+            session.setStatus(ProjectStatus.READY_FOR_REVIEW);
+            return plan;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private TransformationPlan withOptions(ProjectSession session, TransformationPlan plan) {
+        boolean wanted = session.modulithVerification() != null ? session.modulithVerification()
+                : properties.getTransformation().isAddModulithVerification();
+        plan.setModulithVerification(wanted && plan.getStrategy() == TargetStrategy.MODULAR_MONOLITH);
+        return plan;
+    }
+
+    /** Spring Modulith dependency and ModularityTests in the transformed project, when requested. */
+    private void addModulithVerification(ProjectSession session) {
+        TransformationPlan plan = session.plan();
+        if (!plan.isModulithVerification()) {
+            return;
+        }
+        var applicationEntry = plan.getEntries().stream()
+                .filter(e -> e.getScope() == com.anvith.archmorph.parser.SourceScope.MAIN && e.getNode() != null
+                        && e.getNode().getComponentType() == com.anvith.archmorph.parser.ComponentType.APPLICATION)
+                .min(java.util.Comparator.comparing(e -> e.getNode().getId()));
+        String application = applicationEntry.map(e -> plan.getClassMap().getOrDefault(e.getNode().getId(), e.getNode().getId())).orElse(null);
+        // the Maven module of the application class: the part of its path before src/main/java
+        String moduleDirectory = applicationEntry.map(e -> {
+            String path = e.getTargetFile().toString().replace('\\', '/');
+            int index = path.indexOf("src/main/java/");
+            return index > 0 ? path.substring(0, index - 1) : "";
+        }).orElse("");
+        try {
+            var result = modulithSetup.apply(session.workspace().transformed(), moduleDirectory, application,
+                    properties.getTransformation().getModulithVersion());
+            if (result.testFile() != null && !plan.getGeneratedFiles().contains(result.testFile())) {
+                plan.getGeneratedFiles().add(result.testFile());
+            }
+            if (result.pomUpdated()) {
+                plan.getWarnings().add("Spring Modulith " + (result.modulithVersion() == null ? "" : result.modulithVersion() + " ")
+                        + "was added to pom.xml (test scope) with " + (result.testFile() == null ? "no test" : result.testFile())
+                        + "; `mvn test` now verifies the module boundaries.");
+            }
+            plan.getWarnings().addAll(result.warnings());
+        } catch (java.io.IOException e) {
+            throw new com.anvith.archmorph.common.exception.WorkspaceCreationException("Unable to add Spring Modulith verification.", e);
+        }
+    }
+
+    /** MODULES.md in the transformed project; never overwrites a file the project already has. */
+    private void writeModuleDocumentation(ProjectSession session) {
+        Path root = session.workspace().transformed();
+        Path target = root.resolve(com.anvith.archmorph.report.ModuleDocumentation.FILE_NAME);
+        if (Files.exists(target)) {
+            target = root.resolve(com.anvith.archmorph.report.ModuleDocumentation.FALLBACK_FILE_NAME);
+            if (Files.exists(target)) {
+                return;
+            }
+        }
+        ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+        String markdown = moduleDocumentation.render(session.displayName(), session.plan(), modules, session.analysis().graph(),
+                architectures.resolve(session.plan().getStrategy()), boundaries(session));
+        try {
+            Files.writeString(target, markdown, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new com.anvith.archmorph.common.exception.WorkspaceCreationException("Unable to write the module documentation.", e);
+        }
+    }
+
+    /** Module cycles of the current module assignment and how to break them. */
+    public com.anvith.archmorph.analysis.module.boundary.BoundaryReport boundaries(ProjectSession session) {
+        ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
+        return boundaryAdvisor.advise(modules, session.analysis().graph(), session.analysis().facts());
+    }
+
+    public TargetStrategy strategyOf(ProjectSession session) {
+        return session.strategy() != null ? session.strategy() : properties.getTransformation().getStrategy();
     }
 
     // ================================================================== dry run & diff
@@ -217,6 +369,8 @@ public class ProjectWorkflow {
 
             progress.onEvent(ProgressEvent.TRANSFORMATION_STARTED, "Generating the modular project");
             TransformationResult result = engine.execute(session.analysis().model(), session.plan(), session.workspace().transformed());
+            writeModuleDocumentation(session);
+            addModulithVerification(session);
             deadline.check();
             session.lock().lock();
             try {
@@ -278,7 +432,7 @@ public class ProjectWorkflow {
         AnalysisResult analysis = session.analysis();
         ModuleDiscoveryReport modules = editService.apply(analysis.suggestion(), session.decisions(), analysis.graph());
         session.setFinalModules(modules);
-        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), modules, STRATEGY);
+        TransformationPlan plan = withOptions(session, planner.plan(analysis.model(), analysis.graph(), modules, strategyOf(session)));
         session.setPlan(plan);
         progress.onEvent(ProgressEvent.PLAN_CREATED, plan.getEntries().size() + " files planned, " + plan.movedCount() + " to move");
     }

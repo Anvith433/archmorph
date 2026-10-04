@@ -104,7 +104,17 @@ public class ArchMorphProperties {
         /** Move tests that mirror moved production classes, rewrite the rest. */
         private boolean preserveTests = true;
         private Duration timeout = Duration.ofSeconds(300);
-        /** Name of the package segment that holds business modules. */
+        /** Target layout. MODULAR_MONOLITH separates each module's public API from its internals. */
+        private com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy =
+                com.anvith.archmorph.analysis.transformation.target.TargetStrategy.MODULAR_MONOLITH;
+        /**
+         * MODULAR_MONOLITH only: add Spring Modulith's test dependency and a ModularityTests class to the
+         * transformed project, so its own build verifies the module boundaries.
+         */
+        private boolean addModulithVerification = false;
+        /** Spring Modulith version for that; blank derives it from the project's Spring Boot version. */
+        private String modulithVersion = "";
+        /** Name of the package segment that holds business modules (MODULAR_BY_DOMAIN only). */
         private String modulesPackage = "modules";
         /** Name of the package segment that holds shared code. */
         private String sharedPackage = "shared";
@@ -127,6 +137,15 @@ public class ArchMorphProperties {
         private boolean enabled = true;
         /** COMPILE runs {@code mvn -DskipTests compile}; TEST runs {@code mvn test}. */
         private BuildMode mode = BuildMode.COMPILE;
+        /**
+         * Gradle projects: run the host's Gradle (never the uploaded gradlew). Off by default because Gradle build
+         * scripts are code that runs with ArchMorph's privileges.
+         */
+        private boolean gradleEnabled = false;
+        private String gradleExecutable = "gradle";
+        /** Shared Gradle dependency cache; blank uses &lt;workspace&gt;/gradle-home. */
+        private String gradleUserHome = "";
+        private String gradleOpts = "-Xmx1g";
         /** Maven executable from the host. The uploaded mvnw is never executed. */
         private String mavenExecutable = "mvn";
         private Duration timeout = Duration.ofSeconds(240);
@@ -158,6 +177,29 @@ public class ArchMorphProperties {
         /** Honour X-Forwarded-For when identifying clients (only behind a trusted proxy). */
         private boolean trustForwardedHeaders = false;
         private RateLimit rateLimit = new RateLimit();
+        private Auth auth = new Auth();
+    }
+
+    public enum AuthMode {
+        /** Local single-user mode: no login; possession of a random project ID is the capability. */
+        NONE,
+        /** HTTP Basic against the configured users; each user sees only their own projects. */
+        BASIC
+    }
+
+    @Getter
+    @Setter
+    public static class Auth {
+        private AuthMode mode = AuthMode.NONE;
+        /** Users for {@code BASIC}; passwords only as bcrypt hashes ({@code {bcrypt}$2a$...} or {@code $2a$...}). */
+        private List<User> users = new ArrayList<>();
+    }
+
+    @Getter
+    @Setter
+    public static class User {
+        private String username;
+        private String passwordHash;
     }
 
     @Getter

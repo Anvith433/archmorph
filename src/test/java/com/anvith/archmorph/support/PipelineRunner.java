@@ -43,10 +43,13 @@ public class PipelineRunner {
     }
 
     public Run run(String fixture, Path temp) throws IOException {
+        return run(fixture, temp, TargetStrategy.MODULAR_BY_DOMAIN);
+    }
+
+    public Run run(String fixture, Path temp, TargetStrategy strategy) throws IOException {
         Path original = Fixtures.copyTo(fixture, temp.resolve("original"));
         AnalysisResult analysis = analyzer.analyze(original, ProgressListener.NONE, Deadline.never());
-        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), analysis.suggestion(),
-                TargetStrategy.MODULAR_BY_DOMAIN);
+        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), analysis.suggestion(), strategy);
         Path transformed = temp.resolve("transformed");
         TransformationResult result = engine.execute(analysis.model(), plan, transformed);
         ValidationReport report = validation.validate(analysis.model(), analysis.graph(), plan, analysis.suggestion(),

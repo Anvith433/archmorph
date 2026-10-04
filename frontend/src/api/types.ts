@@ -210,6 +210,8 @@ export interface ModuleClass {
   locked: boolean;
   excluded: boolean;
   reasons: string[];
+  exposure: 'PUBLIC_API' | 'INTERNAL';
+  exposureOverride?: 'PUBLIC_API' | 'INTERNAL' | null;
 }
 
 export interface Module {
@@ -236,7 +238,10 @@ export type ModuleEditType =
   | 'EXCLUDE_CLASS'
   | 'INCLUDE_CLASS'
   | 'LOCK_CLASS'
-  | 'UNLOCK_CLASS';
+  | 'UNLOCK_CLASS'
+  | 'EXPOSE_CLASS'
+  | 'INTERNAL_CLASS'
+  | 'AUTO_EXPOSURE';
 
 export interface ModuleEdit {
   type: ModuleEditType;
@@ -248,12 +253,38 @@ export interface ModuleEdit {
   classes?: string[] | null;
 }
 
+export type SuggestionKind = 'MOVE_CLASS' | 'UNIDIRECTIONAL_RELATIONSHIP' | 'SPLIT_FACADE' | 'INVERT_DEPENDENCY';
+
+export interface BoundarySuggestion {
+  id: string;
+  kind: SuggestionKind;
+  from: string;
+  to: string;
+  subject?: string | null;
+  title: string;
+  rationale: string;
+  dependencyCount: number;
+  steps: string[];
+  evidence: string[];
+  edit?: ModuleEdit | null;
+}
+
 export interface Modules {
   suggestion: Module[];
   decisions: ModuleEdit[];
   finalModules: Module[];
   warnings: string[];
   note: string;
+  cycles: string[][];
+  boundarySuggestions: BoundarySuggestion[];
+  strategy?: TargetStrategy | null;
+}
+
+export interface Decisions {
+  version: number;
+  strategy?: TargetStrategy | null;
+  addModulithVerification?: boolean | null;
+  edits: ModuleEdit[];
 }
 
 export interface PlanEntry {
@@ -275,8 +306,10 @@ export interface PlanEntry {
   classes: { source: string; target: string; nested: boolean }[];
 }
 
+export type TargetStrategy = 'MODULAR_MONOLITH' | 'MODULAR_BY_DOMAIN';
+
 export interface Plan {
-  strategy: string;
+  strategy: TargetStrategy;
   basePackage: string;
   fingerprint: string;
   summary: {
@@ -297,6 +330,8 @@ export interface Plan {
   resourceFindings: { file: string; line: number; reference: string; snippet: string }[];
   layout: string[];
   classMap: Record<string, string>;
+  modulithVerification: boolean;
+  generatedFiles: string[];
 }
 
 export interface FileChange {

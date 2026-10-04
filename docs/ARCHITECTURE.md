@@ -135,9 +135,20 @@ All of these are labelled as static-analysis **indicators**, not quality verdict
    weights 0.30/0.20/0.10/0.20/0.10/0.10, normalised.) Used by several modules → `shared`; by one → that module;
    otherwise `shared` with a warning. A class is assigned exactly once (`ModuleDiscoveryReport.assign`
    rejects duplicates).
-4. **Optimizer**: a module without a controller or entity anchor and with ≤ 3 classes merges into the module
-   owning ≥ 60 % of its dependencies; an isolated fragment goes to `shared` with a warning; generic-named
-   classes used by ≥ `shared-usage-threshold` modules are promoted to `shared`. Locked classes never move.
+4. **Optimizer** (locked classes never move):
+   * a base class or interface extended/implemented by classes of two or more modules (`BaseEntity`,
+     `Person` for `Owner` and `Vet`) moves to `shared`, unless it depends on business code;
+   * a module is anchored by a controller, or by an entity together with a service, repository or
+     controller; an unanchored module with ≤ 3 classes merges into the module owning ≥ 60 % of its
+     dependencies (`Role` → `user`), goes to `shared` if several modules use it and it depends on nothing
+     module-specific (an error-response DTO), or to `shared` with a warning if it is isolated;
+   * generic-named classes used by ≥ `shared-usage-threshold` modules are promoted to `shared`;
+   * shared code that depends on modules but that no module uses becomes **application wiring** and is
+     placed in the root package (a global `@RestControllerAdvice` handling module exceptions);
+   * warnings: singleton, oversized, low cohesion, high coupling, facades reaching into ≥ 3 modules.
+
+   Class-name stems ignore technology prefixes (`Jdbc`, `Jpa`, `SpringData`, `Mongo`, …) and API version
+   suffixes (`V1`, `V2`), and role suffixes match longest first (`RowMapper` before `Mapper`).
 5. **Metrics** (`ModuleMetricsCalculator`):
    ```
    cohesion         = internal / (internal + crossing)
@@ -157,7 +168,24 @@ Module names come from `DefaultModuleNamingStrategy` (lower-case Java identifier
 rejected with `INVALID_MODULE_OPERATION`; nothing is partially applied. Suggestion, decisions and final
 modules are all exposed so the UI can show them side by side. Every accepted edit re-plans.
 
-### 3.6 Planning, rewriting, validation
+### 3.6 Module cycles and suggestions
+
+`BoundaryAdvisor` builds the module-level dependency graph from the final assignment and finds cycles
+(Tarjan). It then works greedily until the modules are acyclic, keeping a working copy of the assignment so
+suggestions build on each other:
+
+1. **Split a facade** — a non-controller class reaching into three or more modules inside the cycle. Its
+   public methods are grouped by the module whose types they use; the facade and its interface or
+   implementation count as one, and all dependencies running through them are listed.
+2. **Move a class** — a class that causes a whole module dependency and has more ties to the other module
+   than to its own. The move is simulated on the dependency graph and only suggested when it separates the
+   modules without creating a new cycle. It is returned as a `MOVE_CLASS` module edit, so it can be applied.
+3. Otherwise the **lightest** module dependency of the cycle is broken. The cost is the sum of the
+   dependency weights; the inverse side of a JPA association (`@OneToMany`, `@ManyToMany`) costs a quarter,
+   because removing it keeps the mapping intact. Entity links become **one-directional relationship**
+   suggestions naming the fields; other code becomes **invert the dependency** (domain event or interface).
+
+### 3.7 Planning, rewriting, validation
 
 See [TRANSFORMATION_ENGINE.md](TRANSFORMATION_ENGINE.md). Validation levels, in order:
 
@@ -168,8 +196,8 @@ See [TRANSFORMATION_ENGINE.md](TRANSFORMATION_ENGINE.md). Validation levels, in 
 | 3 | Package consistency | package declaration = directory |
 | 4 | Import resolution | project imports resolve to existing classes; no import refers to a moved class's old location |
 | 5 | Dependency graph | graph rebuilt from the output preserves every original dependency (through the class map) and declares the same classes |
-| 6 | Architecture rules | moved classes under their module package, shared under `shared`; module-level cycles and shared → module dependencies as warnings |
-| 7 | Build | allowlisted `mvn -B -q -DskipTests test-compile` (or `test`) on a scratch copy, in the sandbox; skipped when disabled |
+| 6 | Architecture rules | moved classes under their module package, shared under `shared`; for `MODULAR_MONOLITH` every cross-module dependency must target the other module's API package (error otherwise); module-level cycles and shared → module dependencies as warnings |
+| 7 | Build | allowlisted `mvn -B -q -DskipTests test-compile` (or `test`) on a scratch copy, in the sandbox; for Gradle projects `gradle --no-daemon -q testClasses` (or `test`) only when `gradle-enabled=true`; skipped when disabled |
 
 ## 4. Jobs, sessions and progress
 
@@ -211,7 +239,7 @@ elements). Heavy views are code-split.
 
 | Interface | Default | Purpose |
 |---|---|---|
-| `TargetArchitecture` | `ModularByDomainArchitecture` | other target layouts (e.g. hexagonal) |
+| `TargetArchitecture` | `ModularMonolithArchitecture` (default), `ModularByDomainArchitecture` | other target layouts (e.g. hexagonal) |
 | `BusinessModuleExtractor`, `ModuleOptimizer` | defaults | alternative discovery strategies |
 | `ModuleNamingAssistant` | no-op | optional naming suggestions |
 | `LevelValidator` | 7 levels | extra validation |
