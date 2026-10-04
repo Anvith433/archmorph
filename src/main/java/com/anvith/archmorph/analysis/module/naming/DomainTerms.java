@@ -137,6 +137,12 @@ public final class DomainTerms {
         return splitCamelCase(methodName).stream().map(s -> singular(s.toLowerCase(Locale.ROOT))).toList();
     }
 
+    /** True when every domain token of the class name is generic (ApiResponse, AppConstants, Utils, ...). */
+    public static boolean isGenericName(String className) {
+        List<String> tokens = tokens(className);
+        return tokens.isEmpty() || tokens.stream().allMatch(GENERIC_TERMS::contains);
+    }
+
     public static boolean isGeneric(String term) {
         return term == null || GENERIC_TERMS.contains(term) || term.length() < 2;
     }

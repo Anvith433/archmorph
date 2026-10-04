@@ -107,8 +107,7 @@ public class ModuleAffinityModel {
     }
 
     public boolean hasDomainTerm(DependencyNode node) {
-        List<String> tokens = tokens(node);
-        return !tokens.isEmpty() && !DomainTerms.isGeneric(String.join("", tokens));
+        return !DomainTerms.isGenericName(node.getClassName());
     }
 
     // ------------------------------------------------------------------ signals

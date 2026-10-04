@@ -148,7 +148,7 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
                 if (assignment != null && assignment.locked()) {
                     continue;
                 }
-                if (!DomainTerms.isGeneric(DomainTerms.stem(node.getClassName()))) {
+                if (!DomainTerms.isGenericName(node.getClassName())) {
                     continue;
                 }
                 Set<String> users = new HashSet<>();

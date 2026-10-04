@@ -34,7 +34,7 @@ public class DefaultModuleNamingStrategy implements ModuleNamingStrategy {
         Map<String, Integer> counts = new TreeMap<>();
         for (DependencyNode node : component) {
             String stem = DomainTerms.stem(node.getClassName());
-            if (!DomainTerms.isGeneric(stem)) {
+            if (!DomainTerms.isGenericName(node.getClassName())) {
                 counts.merge(stem, node.getComponentType() == ComponentType.ENTITY ? 2 : 1, Integer::sum);
             }
         }

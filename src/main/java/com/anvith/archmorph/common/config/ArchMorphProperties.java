@@ -132,8 +132,13 @@ public class ArchMorphProperties {
         private Duration timeout = Duration.ofSeconds(240);
         /** Run Maven in offline mode (no downloads). */
         private boolean offline = false;
-        /** Shared local repository; defaults to ~/.m2/repository when blank. */
+        /**
+         * Maven local repository used for validation builds. Blank = a dedicated directory inside the
+         * ArchMorph workspace (never the user's ~/.m2: a malicious pom could poison a shared cache).
+         */
         private String localRepository = "";
+        /** Environment variables copied into the build process; credentials are never forwarded by default. */
+        private List<String> passthroughEnvironment = new ArrayList<>();
         /** JVM options passed to Maven via MAVEN_OPTS. */
         private String mavenOpts = "-Xmx768m";
         /** Captured stdout/stderr are truncated to this many characters. */

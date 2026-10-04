@@ -47,9 +47,7 @@ public class ComponentAnalyzer {
             Pattern.compile("^[a-z_][a-z0-9_]*(\\.[A-Za-z_$][A-Za-z0-9_$]*){2,}$");
 
     private static final Set<String> REFLECTION_METHODS = Set.of(
-            "forName", "loadClass", "getDeclaredMethod", "getDeclaredMethods",
-            "getDeclaredField", "getDeclaredFields", "getDeclaredConstructor",
-            "getDeclaredConstructors");
+            "forName", "loadClass");
 
     private static final Set<String> DYNAMIC_GENERATION_IMPORT_PREFIXES = Set.of(
             "net.bytebuddy", "net.sf.cglib", "javassist", "org.objectweb.asm");
