@@ -1,0 +1,3 @@
+com.demo.model.User = com.demo.modules.user.entity.User
+com.demo.model.Order = com.demo.modules.order.entity.Order
+com.demo.web.Report = com.demo.modules.report.controller.Report

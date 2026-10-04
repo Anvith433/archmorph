@@ -1,0 +1,4 @@
+com.demo.entity.User = com.demo.modules.user.entity.User
+com.demo.common.Audited = com.demo.shared.common.Audited
+com.demo.common.Limits = com.demo.shared.common.Limits
+com.demo.service.UserService = com.demo.modules.user.service.UserService

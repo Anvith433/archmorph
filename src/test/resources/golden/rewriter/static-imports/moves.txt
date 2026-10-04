@@ -1,0 +1,2 @@
+com.demo.common.Constants = com.demo.shared.common.Constants
+com.demo.service.Billing = com.demo.modules.billing.service.Billing

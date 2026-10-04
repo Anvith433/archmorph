@@ -1,2 +1,5 @@
 /mvnw text eol=lf
 *.cmd text eol=crlf
+
+# Golden files must be compared byte for byte (some intentionally use CRLF).
+src/test/resources/golden/** -text

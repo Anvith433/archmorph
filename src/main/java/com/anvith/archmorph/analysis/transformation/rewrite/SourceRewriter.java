@@ -349,9 +349,10 @@ public class SourceRewriter {
                              ImportPlan plan, List<Edit> edits, List<String> warnings) {
         Optional<PackageDeclaration> pkg = cu.getPackageDeclaration();
         boolean hadImports = !cu.getImports().isEmpty();
+        String nl = source.contains("\r\n") ? "\r\n" : "\n";
         String block = plan.groups().stream()
-                .map(group -> String.join("\n", group.stream().map(Imp::line).toList()))
-                .reduce((a, b) -> a + "\n\n" + b).orElse("");
+                .map(group -> String.join(nl, group.stream().map(Imp::line).toList()))
+                .reduce((a, b) -> a + nl + nl + b).orElse("");
 
         // 1. package declaration
         String prefix = "";
@@ -364,7 +365,7 @@ public class SourceRewriter {
                 int end = skipLineBreaks(source, lines.offset(pkg.get().getEnd().orElseThrow()) + 1);
                 edits.add(new Edit(start, end, ""));
             } else {
-                prefix = "package " + newPackage + ";\n\n";
+                prefix = "package " + newPackage + ";" + nl + nl;
             }
         }
 
@@ -377,7 +378,7 @@ public class SourceRewriter {
             return;
         }
         if (hadImports && plan.commentsInside()) {
-            importLineEdits(cu, source, lines, plan, edits);
+            importLineEdits(cu, source, lines, plan, edits, nl);
             warnings.add("The import block contains comments; imports were updated line by line.");
             if (!prefix.isEmpty()) {
                 int at = firstCodeOffset(cu, lines);
@@ -406,15 +407,15 @@ public class SourceRewriter {
         }
         if (pkg.isPresent() && !(packageChanged && newPackage.isEmpty())) {
             int end = lines.offset(pkg.get().getEnd().orElseThrow()) + 1;
-            edits.add(new Edit(end, end, "\n\n" + block));
+            edits.add(new Edit(end, end, nl + nl + block));
         } else {
             int at = firstCodeOffset(cu, lines);
-            edits.add(new Edit(at, at, prefix + block + "\n\n"));
+            edits.add(new Edit(at, at, prefix + block + nl + nl));
         }
     }
 
     /** Fallback when comments sit between imports: rewrite each import on its own line, append additions. */
-    private void importLineEdits(CompilationUnit cu, String source, LineIndex lines, ImportPlan plan, List<Edit> edits) {
+    private void importLineEdits(CompilationUnit cu, String source, LineIndex lines, ImportPlan plan, List<Edit> edits, String nl) {
         int lastRegularEnd = -1;
         for (int i = 0; i < cu.getImports().size(); i++) {
             ImportDeclaration imp = cu.getImports().get(i);
@@ -434,7 +435,7 @@ public class SourceRewriter {
             int at = lastRegularEnd >= 0 ? lastRegularEnd
                     : lines.offset(cu.getImports().get(cu.getImports().size() - 1).getEnd().orElseThrow()) + 1;
             StringBuilder text = new StringBuilder();
-            plan.additions().forEach(a -> text.append('\n').append(a.line()));
+            plan.additions().forEach(a -> text.append(nl).append(a.line()));
             edits.add(new Edit(at, at, text.toString()));
         }
     }

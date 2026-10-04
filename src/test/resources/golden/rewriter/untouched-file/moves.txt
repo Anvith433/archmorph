@@ -1,0 +1,1 @@
+com.demo.entity.User = com.demo.modules.user.entity.User
