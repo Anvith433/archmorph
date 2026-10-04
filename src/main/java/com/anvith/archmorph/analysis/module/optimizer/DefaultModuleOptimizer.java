@@ -3,6 +3,7 @@ package com.anvith.archmorph.analysis.module.optimizer;
 import com.anvith.archmorph.analysis.dependency.DependencyEdge;
 import com.anvith.archmorph.analysis.dependency.DependencyGraph;
 import com.anvith.archmorph.analysis.dependency.DependencyNode;
+import com.anvith.archmorph.analysis.dependency.DependencyType;
 import com.anvith.archmorph.analysis.module.ClassAssignment;
 import com.anvith.archmorph.analysis.module.ModuleCategory;
 import com.anvith.archmorph.analysis.module.ModuleDiscoveryReport;
@@ -45,8 +46,14 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultModuleOptimizer.class);
 
-    /** A module with one of these roles is a module in its own right, not a fragment. */
-    private static final Set<ComponentType> ANCHORS = EnumSet.of(ComponentType.CONTROLLER, ComponentType.ENTITY);
+    /** A module with a controller is a module in its own right, not a fragment. */
+    private static final Set<ComponentType> ANCHORS = EnumSet.of(ComponentType.CONTROLLER);
+
+    /** An entity anchors a module only together with code that works on it. */
+    private static final Set<ComponentType> ENTITY_COMPANIONS = EnumSet.of(ComponentType.SERVICE, ComponentType.REPOSITORY,
+            ComponentType.CONTROLLER);
+
+    private static final Set<DependencyType> SUBTYPING = EnumSet.of(DependencyType.INHERITANCE, DependencyType.IMPLEMENTATION);
 
     private final ArchMorphProperties properties;
     private final ModuleMetricsCalculator metricsCalculator;
@@ -61,6 +68,7 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
         ModuleDiscoveryReport report = input.copy();
         ArchMorphProperties.ModuleDiscovery config = properties.getModuleDiscovery();
 
+        promoteSharedSupertypes(report, graph);
         mergeFragments(report, graph);
         promoteShared(report, graph, config);
         enforceSingleOwnership(report);
@@ -97,11 +105,23 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
                 if (total == 0) {
                     continue;
                 }
+                Set<String> users = businessUsers(report, graph, fragment);
                 Map.Entry<String, Integer> best = weights.entrySet().stream()
                         .max(Map.Entry.<String, Integer>comparingByValue().thenComparing(Map.Entry.comparingByKey(Comparator.reverseOrder())))
                         .orElseThrow();
                 ModuleInfo target = report.getModule(best.getKey());
                 if (target == null || !target.isBusinessModule() || best.getValue() < 0.6 * total) {
+                    if (users.size() >= 2 && dependsOnlyOnShared(report, graph, fragment)) {
+                        // e.g. an error-response DTO used by the controllers of several modules
+                        for (DependencyNode node : new ArrayList<>(fragment.getClasses())) {
+                            report.assign(node, ModuleDiscoveryReport.SHARED, ModuleCategory.SHARED, 0.6,
+                                    ClassAssignment.Origin.AUTOMATIC,
+                                    List.of("used by modules " + users + " and owned by none of them; placed in shared"));
+                        }
+                        report.pruneEmptyModules();
+                        changed = true;
+                        break;
+                    }
                     continue;
                 }
                 log.debug("Merging fragment module {} into {}", fragment.getModuleName(), target.getModuleName());
@@ -143,7 +163,98 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
     }
 
     private boolean isAnchored(ModuleInfo module) {
-        return module.getClasses().stream().anyMatch(n -> n.getComponentType() != null && ANCHORS.contains(n.getComponentType()));
+        boolean controller = module.getClasses().stream().anyMatch(n -> n.getComponentType() != null && ANCHORS.contains(n.getComponentType()));
+        boolean entity = module.getClasses().stream().anyMatch(n -> n.getComponentType() == ComponentType.ENTITY);
+        boolean companion = module.getClasses().stream().anyMatch(n -> n.getComponentType() != null
+                && ENTITY_COMPANIONS.contains(n.getComponentType()));
+        return controller || (entity && companion);
+    }
+
+    /** Business modules (other than its own) whose classes use the module. */
+    private Set<String> businessUsers(ModuleDiscoveryReport report, DependencyGraph graph, ModuleInfo module) {
+        Set<String> users = new java.util.TreeSet<>();
+        for (DependencyNode node : module.getClasses()) {
+            for (DependencyNode caller : graph.getPredecessors(node)) {
+                String owner = report.moduleOf(caller.getId());
+                ModuleInfo ownerModule = owner == null ? null : report.getModule(owner);
+                if (ownerModule != null && ownerModule.isBusinessModule() && !owner.equals(module.getModuleName())) {
+                    users.add(owner);
+                }
+            }
+        }
+        return users;
+    }
+
+    /** True when the module's classes depend on nothing but shared/application code (or nothing at all). */
+    private boolean dependsOnlyOnShared(ModuleDiscoveryReport report, DependencyGraph graph, ModuleInfo module) {
+        for (DependencyNode node : module.getClasses()) {
+            for (DependencyNode target : graph.getSuccessors(node)) {
+                String owner = report.moduleOf(target.getId());
+                ModuleInfo targetModule = owner == null ? null : report.getModule(owner);
+                if (targetModule != null && targetModule.isBusinessModule() && !owner.equals(module.getModuleName())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A base class or interface extended by classes of several business modules ({@code BaseEntity},
+     * {@code Person} for {@code Owner} and {@code Vet}) cannot live in any one of them without making the
+     * others depend on it: it belongs in shared. Repeats until stable, because moving a type can make its own
+     * supertype shared as well. Supertypes that depend on business modules stay put (with a warning).
+     */
+    private void promoteSharedSupertypes(ModuleDiscoveryReport report, DependencyGraph graph) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (ModuleInfo module : new ArrayList<>(report.getBusinessModules())) {
+                for (DependencyNode node : new ArrayList<>(module.getClasses())) {
+                    ClassAssignment assignment = report.getAssignment(node.getId());
+                    if (assignment != null && assignment.locked()) {
+                        continue;
+                    }
+                    Set<String> subtypeModules = new java.util.TreeSet<>();
+                    for (DependencyEdge edge : graph.getIncomingEdges(node)) {
+                        if (SUBTYPING.contains(edge.getDependencyType())) {
+                            String owner = report.moduleOf(edge.getSource().getId());
+                            ModuleInfo ownerModule = owner == null ? null : report.getModule(owner);
+                            if (ownerModule != null && ownerModule.isBusinessModule()) {
+                                subtypeModules.add(owner);
+                            }
+                        }
+                    }
+                    subtypeModules.add(module.getModuleName());
+                    long others = subtypeModules.stream().filter(m -> !m.equals(module.getModuleName())).count();
+                    if (others < 2) {
+                        continue; // a subtype in one other module is an ordinary cross-module dependency
+                    }
+                    if (dependsOnBusinessModule(report, graph, node)) {
+                        report.getWarnings().add(node.getClassName() + " is a base type for modules " + subtypeModules
+                                + " but depends on business code; it was left in '" + module.getModuleName() + "'.");
+                        continue;
+                    }
+                    report.assign(node, ModuleDiscoveryReport.SHARED, ModuleCategory.SHARED, 0.8,
+                            ClassAssignment.Origin.AUTOMATIC,
+                            List.of("base type extended or implemented by modules " + subtypeModules));
+                    changed = true;
+                }
+            }
+            report.pruneEmptyModules();
+        }
+    }
+
+    private boolean dependsOnBusinessModule(ModuleDiscoveryReport report, DependencyGraph graph, DependencyNode node) {
+        String own = report.moduleOf(node.getId());
+        for (DependencyNode target : graph.getSuccessors(node)) {
+            String owner = report.moduleOf(target.getId());
+            ModuleInfo targetModule = owner == null ? null : report.getModule(owner);
+            if (targetModule != null && targetModule.isBusinessModule() && !owner.equals(own)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasDependencies(DependencyGraph graph, ModuleInfo module) {
@@ -212,6 +323,12 @@ public class DefaultModuleOptimizer implements ModuleOptimizer {
             }
             if (module.getClassCount() >= 3 && module.getCohesion() < config.getLowCohesionThreshold()) {
                 module.getWarnings().add(String.format("[opt] low cohesion (%.2f): most dependencies cross the module boundary", module.getCohesion()));
+            }
+            Set<String> targets = new java.util.TreeSet<>(module.getDependenciesOnModules().keySet());
+            targets.removeIf(t -> report.getModule(t) == null || !report.getModule(t).isBusinessModule());
+            if (targets.size() >= 3 && module.getCohesion() < config.getLowCohesionThreshold()) {
+                module.getWarnings().add("[opt] looks like a facade over modules " + targets
+                        + "; in a modular monolith consider splitting it so each module owns its part");
             }
             if (module.getExternalCoupling() > config.getHighCouplingThreshold()) {
                 module.getWarnings().add(String.format("[opt] highly coupled to other modules (%.2f); automatic transformation is safe but review the boundaries", module.getExternalCoupling()));

@@ -1,0 +1,39 @@
+{
+  "description": "Real-world layered patterns (modelled on spring-petclinic-rest): technology-prefixed repository implementations, versioned controllers, base entities inherited across modules, a facade service, a cross-module error DTO, a dependent entity (Role) and a class referenced by name from a resource file.",
+  "modules": [
+    "clinic",
+    "owner",
+    "pet",
+    "user",
+    "vet"
+  ],
+  "moved": {
+    "com.clinic.repository.jdbc.JdbcOwnerRepositoryImpl": "com.clinic.modules.owner.repository.JdbcOwnerRepositoryImpl",
+    "com.clinic.repository.jpa.JpaOwnerRepositoryImpl": "com.clinic.modules.owner.repository.JpaOwnerRepositoryImpl",
+    "com.clinic.repository.jdbc.JdbcPetRepositoryImpl": "com.clinic.modules.pet.repository.JdbcPetRepositoryImpl",
+    "com.clinic.rest.controller.v1.OwnerRestControllerV1": "com.clinic.modules.owner.controller.OwnerRestControllerV1",
+    "com.clinic.model.Role": "com.clinic.modules.user.entity.Role",
+    "com.clinic.model.PetType": "com.clinic.modules.pet.entity.PetType",
+    "com.clinic.model.NamedEntity": "com.clinic.modules.pet.entity.NamedEntity",
+    "com.clinic.model.Person": "com.clinic.shared.common.Person",
+    "com.clinic.model.BaseEntity": "com.clinic.shared.common.BaseEntity",
+    "com.clinic.rest.controller.BindingErrorsResponse": "com.clinic.shared.common.BindingErrorsResponse",
+    "com.clinic.service.ClinicServiceImpl": "com.clinic.modules.clinic.service.ClinicServiceImpl"
+  },
+  "kept": [
+    "com.clinic.ClinicApplication",
+    "com.clinic.rest.validation.PetAgeValidation"
+  ],
+  "manualReview": [
+    "com.clinic.rest.validation.PetAgeValidation"
+  ],
+  "sharedClasses": [
+    "com.clinic.model.BaseEntity",
+    "com.clinic.model.Person",
+    "com.clinic.rest.controller.BindingErrorsResponse"
+  ],
+  "conflicts": [],
+  "parseErrors": 0,
+  "minCycles": 0,
+  "compiles": true
+}

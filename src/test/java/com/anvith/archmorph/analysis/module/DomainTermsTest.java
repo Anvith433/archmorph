@@ -34,4 +34,17 @@ class DomainTermsTest {
         assertThat(DomainTerms.tokenSimilarity(DomainTerms.tokens("Order"), DomainTerms.tokens("OrderItem"))).isGreaterThanOrEqualTo(0.6);
         assertThat(DomainTerms.tokenSimilarity(DomainTerms.tokens("User"), DomainTerms.tokens("Payment"))).isZero();
     }
+
+    @Test
+    void technologyPrefixesAndApiVersionsAreNotDomains() {
+        assertThat(DomainTerms.stem("JdbcPetRepositoryImpl")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("SpringDataOwnerRepository")).isEqualTo("owner");
+        assertThat(DomainTerms.stem("JpaVisitRepositoryImpl")).isEqualTo("visit");
+        assertThat(DomainTerms.stem("JdbcPetRowMapper")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("PetTypeRepositoryOverride")).isEqualTo("pet");
+        assertThat(DomainTerms.stem("OwnerRestControllerV2")).isEqualTo("owner");
+        // a prefix only counts as a whole word
+        assertThat(DomainTerms.stem("RestaurantService")).isEqualTo("restaurant");
+        assertThat(DomainTerms.stem("MockingbirdController")).isEqualTo("mockingbird");
+    }
 }
