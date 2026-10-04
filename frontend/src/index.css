@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Dark-first developer tooling palette with high-contrast text;
+ * a light theme is available through [data-theme="light"].
+ */
+:root {
+  --bg: #0a0d14;
+  --bg-elevated: #10141e;
+  --bg-sunken: #070910;
+  --panel: #131927;
+  --panel-hover: #182033;
+  --border: #222b3d;
+  --border-strong: #2f3a52;
+  --text: #e6e9f2;
+  --text-muted: #9aa4ba;
+  --text-faint: #6b7590;
+  --accent: #7c9cff;
+  --accent-strong: #5b7cfa;
+  --accent-soft: rgb(124 156 255 / 0.12);
+  --ok: #3fb68b;
+  --ok-soft: rgb(63 182 139 / 0.13);
+  --warn: #e5a93c;
+  --warn-soft: rgb(229 169 60 / 0.13);
+  --fail: #f0616d;
+  --fail-soft: rgb(240 97 109 / 0.13);
+  --info: #5cb8e6;
+  --info-soft: rgb(92 184 230 / 0.13);
+  --diff-add: rgb(63 182 139 / 0.14);
+  --diff-del: rgb(240 97 109 / 0.14);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f7fb;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eef0f6;
+  --panel: #ffffff;
+  --panel-hover: #f2f4fa;
+  --border: #dde1eb;
+  --border-strong: #c7cdda;
+  --text: #141824;
+  --text-muted: #4d5568;
+  --text-faint: #7a8296;
+  --accent: #3d5fe0;
+  --accent-strong: #2f4fd0;
+  --accent-soft: rgb(61 95 224 / 0.1);
+  --ok: #1f8a63;
+  --ok-soft: rgb(31 138 99 / 0.1);
+  --warn: #a8700f;
+  --warn-soft: rgb(168 112 15 / 0.1);
+  --fail: #c9303e;
+  --fail-soft: rgb(201 48 62 / 0.09);
+  --info: #1f7aa8;
+  --info-soft: rgb(31 122 168 / 0.1);
+  --diff-add: rgb(31 138 99 / 0.12);
+  --diff-del: rgb(201 48 62 / 0.1);
+  color-scheme: light;
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-elevated: var(--bg-elevated);
+  --color-sunken: var(--bg-sunken);
+  --color-panel: var(--panel);
+  --color-panel-hover: var(--panel-hover);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-fail: var(--fail);
+  --color-fail-soft: var(--fail-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-diff-add: var(--diff-add);
+  --color-diff-del: var(--diff-del);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* React Flow theming */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__controls-button {
+  background: var(--panel) !important;
+  border-color: var(--border) !important;
+  fill: var(--text) !important;
+}
+.react-flow__minimap {
+  background: var(--bg-elevated) !important;
+}
+
+/* React Flow theming through its documented CSS variables. */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-label-background-color: var(--panel);
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--panel-hover);
+  --xy-controls-button-color: var(--text-muted);
+  --xy-controls-button-color-hover: var(--text);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: none;
+  --xy-node-boxshadow-selected: none;
+}
