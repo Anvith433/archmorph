@@ -57,3 +57,22 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t archmorph:ci .
+      - name: Smoke test (hardened, as in docker-compose.yml)
+        run: |
+          docker run -d --name archmorph -p 127.0.0.1:8080:8080 --read-only --tmpfs /tmp:size=1g,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges:true archmorph:ci
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/actuator/health && exit 0
+            sleep 2
+          done
+          docker logs archmorph
+          exit 1

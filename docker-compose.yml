@@ -1,0 +1,29 @@
+# ArchMorph with a hardened container. Start:  docker compose up --build
+# Then open http://localhost:8080. Read docs/DEPLOYMENT.md before exposing it beyond this machine.
+services:
+  archmorph:
+    build: .
+    image: archmorph:local
+    ports:
+      - "127.0.0.1:8080:8080"          # loopback only; use a TLS reverse proxy to expose it
+    # Optional login (recommended whenever others can reach the port). Create archmorph.env from
+    # archmorph.env.example with a hash from:  docker compose run --rm archmorph hash-password
+    # env_file:
+    #   - archmorph.env
+    volumes:
+      - archmorph-data:/data           # workspaces + shared Maven repository
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777         # uploads are buffered here (archive limit 100 MB)
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Limits that the process sandbox cannot enforce on its own (see docs/THREAT_MODEL.md)
+    mem_limit: 4g
+    pids_limit: 512
+    cpus: 2
+    restart: unless-stopped
+
+volumes:
+  archmorph-data:

@@ -89,7 +89,8 @@ guard refuses. Lessons from these runs are captured in the `ports-and-adapters` 
 | Multi-module Maven builds (nested aggregators) | implemented; classes move within their own Maven module |
 | Gradle builds (single and multi-project, Groovy or Kotlin DSL) | implemented; scripts are read, never evaluated; the Gradle build level is opt-in |
 | Kotlin, Groovy, Scala sources | **not rewritten** (preserved and reported) |
-| Authentication / multi-user | structure prepared, **not implemented** (local mode) |
+| Optional login (HTTP Basic, bcrypt, per-user projects) | implemented, off by default (local mode) |
+| Docker image + hardened compose file | implemented (non-root, read-only, no capabilities, resource limits) |
 
 ## How it works
 
@@ -152,6 +153,16 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
+### With Docker
+
+```bash
+docker compose up --build        # UI and API on http://localhost:8080
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for login, TLS and egress control.
+
+### From source
+
 Requirements: **JDK 21**, **Maven 3.9+** (or the bundled `./mvnw`), **Node.js ≥ 20.19** with npm for the UI.
 Build validation additionally needs `mvn` on the `PATH` of the server.
 
@@ -210,6 +221,7 @@ bin/archmorph plan      project.zip [--report-dir DIR]
 bin/archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
                         [--strategy modular-monolith|modular-by-domain] [--add-modulith-test]
                         [--decisions archmorph-decisions.json]
+bin/archmorph hash-password     # bcrypt hash for archmorph.security.auth.users[n].password-hash
 ```
 
 A review made in the UI can be exported (Modules page → *Export decisions*) and replayed with `--decisions`,
@@ -267,6 +279,7 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and isolated repository |
 | `archmorph.validation.build.timeout` | `PT4M` | hard wall-clock limit, process tree killed |
 | `archmorph.security.allowed-origins` | `http://localhost:5173` | CORS allowlist (never `*`) |
+| `archmorph.security.auth.mode` / `auth.users[n].username` / `auth.users[n].password-hash` | `NONE` / – / – | `BASIC` enables login; hashes from `archmorph hash-password` (bcrypt only) |
 | `archmorph.security.rate-limit.*` | enabled | per-client budgets for upload / expensive / download / general |
 | `archmorph.jobs.worker-threads` / `max-queued-jobs` / `max-active-jobs-per-client` | `2` / `20` / `3` | job capacity |
 
@@ -278,8 +291,9 @@ See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ## Security model
 
-Local, single-user mode by default (no login; designed so authentication can be added later through
-`ProjectAccessPolicy` and Spring Security). Highlights:
+Local, single-user mode by default (no login). For a team, enable HTTP Basic login
+(`archmorph.security.auth.mode=BASIC`, bcrypt-hashed users, projects visible only to their owner, CSRF header
+check, login throttling) and run the hardened container; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Highlights:
 
 * hardened extraction: Zip Slip, absolute paths, symlinks, NUL bytes, bombs, entry and size limits, `CREATE_NEW`
 * server-generated UUIDs; every path resolved and verified inside its own workspace; workspaces expire

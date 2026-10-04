@@ -102,4 +102,21 @@ class CliRunnerTest {
         Path broken = Files.writeString(temp.resolve("broken.json"), "{\"version\": 99, \"edits\": []}");
         assertThat(cli.execute(new String[]{"plan", zip.toString(), "--decisions", broken.toString()})).isEqualTo(2);
     }
+
+    @Test
+    void hashPasswordPrintsABcryptHashAndNeverThePassword() {
+        ByteArrayOutputStream console = new ByteArrayOutputStream();
+        CliRunner cli = new CliRunner(workflow, workspaceManager, reports, properties, console,
+                new java.io.ByteArrayInputStream("a-long-enough-password\n".getBytes()));
+
+        assertThat(cli.execute(new String[]{"hash-password"})).isZero();
+        String printed = console.toString().trim();
+        assertThat(printed).startsWith("{bcrypt}$2").doesNotContain("a-long-enough-password");
+        assertThat(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+                .matches("a-long-enough-password", printed.substring("{bcrypt}".length()))).isTrue();
+
+        CliRunner shortPassword = new CliRunner(workflow, workspaceManager, reports, properties, new ByteArrayOutputStream(),
+                new java.io.ByteArrayInputStream("short\n".getBytes()));
+        assertThat(shortPassword.execute(new String[]{"hash-password"})).isEqualTo(2);
+    }
 }

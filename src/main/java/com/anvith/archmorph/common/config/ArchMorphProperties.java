@@ -177,6 +177,29 @@ public class ArchMorphProperties {
         /** Honour X-Forwarded-For when identifying clients (only behind a trusted proxy). */
         private boolean trustForwardedHeaders = false;
         private RateLimit rateLimit = new RateLimit();
+        private Auth auth = new Auth();
+    }
+
+    public enum AuthMode {
+        /** Local single-user mode: no login; possession of a random project ID is the capability. */
+        NONE,
+        /** HTTP Basic against the configured users; each user sees only their own projects. */
+        BASIC
+    }
+
+    @Getter
+    @Setter
+    public static class Auth {
+        private AuthMode mode = AuthMode.NONE;
+        /** Users for {@code BASIC}; passwords only as bcrypt hashes ({@code {bcrypt}$2a$...} or {@code $2a$...}). */
+        private List<User> users = new ArrayList<>();
+    }
+
+    @Getter
+    @Setter
+    public static class User {
+        private String username;
+        private String passwordHash;
     }
 
     @Getter

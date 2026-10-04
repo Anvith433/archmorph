@@ -18,6 +18,11 @@ On failure `success` is `false`, `data` is absent, `errorCode` is a stable machi
 present) tells the user what to do. Messages never contain file-system paths, stack traces or internal class
 names. Every response carries `X-Request-Id`.
 
+**Authentication.** Off by default. With `archmorph.security.auth.mode=BASIC` every request except
+`/actuator/health` needs HTTP Basic credentials (`401` with `WWW-Authenticate: Basic` otherwise), requests that
+change state (`POST`, `PUT`, `DELETE`) must also send `X-Requested-With: XMLHttpRequest` (`403` otherwise), and a
+project is only visible to the user who uploaded it (`404` for everyone else).
+
 Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed identifiers are rejected with
 `400 INVALID_REQUEST`. Long-running operations return `202 Accepted` with a `jobId`; poll the job.
 
@@ -207,13 +212,15 @@ Level and overall status: `PASS`, `WARN`, `FAIL`, `SKIPPED`.
 | 400 | `INVALID_REQUEST` | malformed identifier, missing file, bad JSON, validation failure |
 | 400 | `INVALID_ARCHIVE` / `UNSAFE_ARCHIVE_ENTRY` | not a ZIP; traversal, absolute path, symlink, duplicate entry |
 | 400 | `INVALID_MODULE_OPERATION` | a module decision cannot be applied |
-| 404 | `PROJECT_NOT_FOUND` / `JOB_NOT_FOUND` / `RESOURCE_NOT_FOUND` | unknown or expired ID, report not yet produced |
+| 401 | `UNAUTHORIZED` | login enabled and no or wrong credentials |
+| 403 | `INVALID_REQUEST` | login enabled and a state-changing request without `X-Requested-With` |
+| 404 | `PROJECT_NOT_FOUND` / `JOB_NOT_FOUND` / `RESOURCE_NOT_FOUND` | unknown or expired ID, another user's project, report not yet produced |
 | 409 | `INVALID_STATE` | e.g. transform before analysis finished, download before transformation |
 | 413 | `ARCHIVE_TOO_LARGE` | upload above `max-archive-size` |
 | 422 | `ARCHIVE_LIMIT_EXCEEDED` | entry count, entry size, total size or compression ratio exceeded |
 | 422 | `INVALID_PROJECT_STRUCTURE` / `SOURCE_NOT_FOUND` / `JAVA_PARSE_ERROR` | unsupported build tool, no Java sources, … |
 | 422 | `ANALYSIS_LIMIT_EXCEEDED` / `TIMEOUT` | too many files, analysis deadline exceeded |
-| 429 | `RATE_LIMITED` / `TOO_MANY_JOBS` | rate limit or job quota; see `Retry-After` |
+| 429 | `RATE_LIMITED` / `TOO_MANY_JOBS` | rate limit, job quota or too many failed logins; see `Retry-After` |
 | 500 | `WORKSPACE_ERROR` / `STORAGE_ERROR` / `EXTRACTION_ERROR` / `TRANSFORMATION_ERROR` / `INTERNAL_ERROR` | server-side failure; quote the `requestId` |
 
 Example:

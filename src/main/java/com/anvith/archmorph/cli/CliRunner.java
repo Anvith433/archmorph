@@ -3,9 +3,11 @@ package com.anvith.archmorph.cli;
 import com.anvith.archmorph.analysis.transformation.SafetyLevel;
 import com.anvith.archmorph.analysis.transformation.planner.TransformationPlan;
 import com.anvith.archmorph.analysis.transformation.planner.TransformationPlanEntry;
+import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
 import com.anvith.archmorph.analysis.validation.LevelResult;
 import com.anvith.archmorph.analysis.validation.ValidationReport;
 import com.anvith.archmorph.analysis.validation.ValidationStatus;
+import com.anvith.archmorph.api.dto.ModuleDtos;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
 import com.anvith.archmorph.common.exception.ArchMorphException;
 import com.anvith.archmorph.common.util.FilenameSanitizer;
@@ -25,6 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -32,8 +35,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Optional;
-import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
-import com.anvith.archmorph.api.dto.ModuleDtos;
 
 /**
  * Command-line interface backed by the same {@link ProjectWorkflow} as the web API.
@@ -42,6 +43,7 @@ import com.anvith.archmorph.api.dto.ModuleDtos;
  * archmorph analyze   project.zip [--report-dir DIR]
  * archmorph plan      project.zip [--report-dir DIR]
  * archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
+ * archmorph hash-password            (reads a password, prints a bcrypt hash for archmorph.security.auth.users)
  *
  * options: --strategy modular-monolith (default) | modular-by-domain, --add-modulith-test, --decisions file.json
  * </pre>
@@ -56,16 +58,23 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
     private final ReportService reports;
     private final ArchMorphProperties properties;
     private final PrintStream out;
+    private final InputStream in;
     private int exitCode;
 
     @Autowired
     public CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
                      ArchMorphProperties properties) {
-        this(workflow, workspaceManager, reports, properties, System.out);
+        this(workflow, workspaceManager, reports, properties, System.out, System.in);
     }
 
     CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
               ArchMorphProperties properties, OutputStream out) {
+        this(workflow, workspaceManager, reports, properties, out, InputStream.nullInputStream());
+    }
+
+    CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
+              ArchMorphProperties properties, OutputStream out, InputStream in) {
+        this.in = in;
         this.workflow = workflow;
         this.workspaceManager = workspaceManager;
         this.reports = reports;
@@ -90,6 +99,9 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
             return args.length == 0 ? 2 : 0;
         }
         String command = args[0];
+        if (command.equals("hash-password")) {
+            return hashPassword();
+        }
         Path zip = null;
         Path output = null;
         Path reportDir = null;
@@ -268,6 +280,10 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         out.println("Reports written to " + reportDir.getFileName());
     }
 
+    private int hashPassword() {
+        return PasswordHashCommand.run(in, out);
+    }
+
     private void usage() {
         out.println("""
                 ArchMorph - static-analysis driven migration of layered Java applications to modular monoliths
@@ -276,6 +292,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
                   archmorph analyze   <project.zip> [--report-dir DIR]
                   archmorph plan      <project.zip> [--report-dir DIR]
                   archmorph transform <project.zip> --output <transformed.zip> [--report-dir DIR] [--no-build]
+                  archmorph hash-password       read a password, print a bcrypt hash for authentication
 
                 Options:
                   --strategy modular-monolith   module root = public API, sub-packages internal (default)
@@ -288,6 +305,6 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
 
     /** True when the arguments select CLI mode. */
     public static boolean isCliInvocation(String[] args) {
-        return args.length > 0 && List.of("analyze", "plan", "transform", "help").contains(args[0]);
+        return args.length > 0 && List.of("analyze", "plan", "transform", "hash-password", "help").contains(args[0]);
     }
 }

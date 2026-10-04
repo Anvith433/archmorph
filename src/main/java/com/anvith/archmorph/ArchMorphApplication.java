@@ -1,6 +1,7 @@
 package com.anvith.archmorph;
 
 import com.anvith.archmorph.cli.CliRunner;
+import com.anvith.archmorph.cli.PasswordHashCommand;
 import com.anvith.archmorph.common.config.ArchMorphProperties;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
@@ -26,6 +27,9 @@ import java.util.stream.Stream;
 public class ArchMorphApplication {
 
     public static void main(String[] args) throws IOException {
+        if (args.length > 0 && args[0].equals("hash-password")) {
+            System.exit(PasswordHashCommand.run(args));
+        }
         if (CliRunner.isCliInvocation(args)) {
             System.exit(runCli(args));
         }
