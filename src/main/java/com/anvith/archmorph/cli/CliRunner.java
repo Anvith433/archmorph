@@ -17,6 +17,7 @@ import com.anvith.archmorph.report.ReportName;
 import com.anvith.archmorph.report.ReportService;
 import com.anvith.archmorph.workspace.ProjectWorkspace;
 import com.anvith.archmorph.workspace.WorkspaceManager;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.ExitCodeGenerator;
@@ -53,6 +54,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
     private final PrintStream out;
     private int exitCode;
 
+    @Autowired
     public CliRunner(ProjectWorkflow workflow, WorkspaceManager workspaceManager, ReportService reports,
                      ArchMorphProperties properties) {
         this(workflow, workspaceManager, reports, properties, System.out);

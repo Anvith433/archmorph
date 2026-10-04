@@ -9,9 +9,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * ArchMorph entry point. Started without arguments (or with Spring options) it runs the web server;
@@ -24,7 +27,15 @@ public class ArchMorphApplication {
 
     public static void main(String[] args) throws IOException {
         if (CliRunner.isCliInvocation(args)) {
-            Path workspace = Files.createTempDirectory("archmorph-cli-");
+            System.exit(runCli(args));
+        }
+        SpringApplication.run(ArchMorphApplication.class, args);
+    }
+
+    /** Runs one CLI command in a non-web context with a temporary workspace; returns the exit code. */
+    static int runCli(String[] args) throws IOException {
+        Path workspace = Files.createTempDirectory("archmorph-cli-");
+        try {
             SpringApplication application = new SpringApplication(ArchMorphApplication.class);
             application.setWebApplicationType(WebApplicationType.NONE);
             application.setBannerMode(Banner.Mode.OFF);
@@ -34,10 +45,18 @@ public class ArchMorphApplication {
                     "spring.main.log-startup-info", "false",
                     "logging.level.root", "WARN",
                     "archmorph.validation.build.mode", "COMPILE"));
-            int exit = SpringApplication.exit(application.run(args));
-            System.exit(exit);
+            return SpringApplication.exit(application.run(args));
+        } finally {
+            deleteQuietly(workspace);
         }
-        SpringApplication.run(ArchMorphApplication.class, args);
+    }
+
+    private static void deleteQuietly(Path root) {
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+        } catch (IOException | UncheckedIOException ignored) {
+            // best effort: the directory is in the system temp folder
+        }
     }
 
 }
