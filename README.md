@@ -9,11 +9,18 @@ rewriter, validates the result on seven levels (up to a sandboxed Maven compile)
 transformed project plus JSON and Markdown reports.
 
 ```
-com.demo.controller.OrderController        com.demo.modules.order.controller.OrderController
-com.demo.service.OrderService        ──▶    com.demo.modules.order.service.OrderService
-com.demo.repository.OrderRepository         com.demo.modules.order.repository.OrderRepository
-com.demo.common.ApiResponse                 com.demo.shared.common.ApiResponse
+layered                                      modular monolith
+com.demo.controller.OrderController          com.demo.order.controller.OrderController   (internal)
+com.demo.service.OrderService          ──▶   com.demo.order.OrderService                 (order's public API)
+com.demo.repository.OrderRepository          com.demo.order.repository.OrderRepository   (internal)
+com.demo.common.ApiResponse                  com.demo.shared.ApiResponse                 (shared API)
+com.demo.exception.GlobalExceptionHandler    com.demo.GlobalExceptionHandler             (application wiring)
 ```
+
+Each module's root package is its **public API** — the types other modules use — and its sub-packages are
+**internal**. This follows the [Spring Modulith](https://spring.io/projects/spring-modulith) conventions, so the
+result can be checked with `ApplicationModules.of(App.class).verify()`. The transformed project ships a
+`MODULES.md` describing every module, its API, its dependencies and that verification test.
 
 > **What ArchMorph is not.** It does not migrate an architecture fully automatically and it does not prove
 > that behaviour is preserved. Module boundaries are a design decision; ArchMorph gives you evidence,
@@ -44,6 +51,14 @@ Working end to end for Maven projects with the conventional layered structure
 generic, default-package and test-source cases covered by the fixture suite. Experimental for anything else.
 Treat every result as a proposal to review.
 
+**Checked on real code:** [spring-petclinic-rest](https://github.com/spring-petclinic/spring-petclinic-rest)
+(109 Java files, Jdbc/Jpa/Spring Data variants, OpenAPI-generated DTOs, MapStruct). ArchMorph proposes the
+modules owner, pet, vet, visit, specialty and user, and flags `ClinicService` as a facade over all of them.
+The transformed project compiles and passes all 237 of its own tests. Spring Modulith's verifier still
+reports cycles there (bidirectional JPA relations such as Owner ↔ Pet, and the facade): those are design
+decisions that moving packages cannot make, and ArchMorph reports them as warnings. On the `spring-layered`
+fixture, the transformed project passes `ApplicationModules.verify()` as well as its tests.
+
 | Area | State |
 |---|---|
 | Upload, safe extraction, workspace isolation | implemented, tested against Zip Slip, bombs, symlinks |
@@ -56,6 +71,8 @@ Treat every result as a proposal to review.
 | 7-level validation incl. sandboxed Maven | implemented |
 | Async jobs, REST API, rate limiting, security headers | implemented, single instance, in memory |
 | React review UI | implemented |
+| Modular monolith target (module API vs internals, Spring Modulith conventions) | implemented, default |
+| Package-by-module target (`modules.<module>.<layer>`) | implemented, selectable |
 | Gradle, Kotlin, multi-module Maven builds | **not supported** (detected and reported) |
 | Authentication / multi-user | structure prepared, **not implemented** (local mode) |
 
@@ -87,8 +104,14 @@ Every phase returns a structured result; nothing in the pipeline communicates th
 * **Modules.** A documented affinity model combines dependency strength, naming, package, entity,
   endpoint and type-usage signals (weights configurable). Fixed roles (application, configuration,
   security, exception handlers) never join a business module. Code used by several modules goes to
-  `shared` exactly once — **never duplicated**. An optimizer merges fragments and emits warnings
-  (singleton, oversized, low cohesion, high coupling).
+  `shared` exactly once — **never duplicated**. Technology words (`Jdbc`, `Jpa`, `SpringData`, API versions)
+  are not mistaken for domains; base types extended by several modules go to `shared`; shared code that
+  depends on modules but is used by none (a global exception handler) becomes application wiring in the root
+  package. An optimizer merges fragments and emits warnings (singleton, oversized, low cohesion, high
+  coupling, facades).
+* **Target.** `MODULAR_MONOLITH` (default): a class used by another module goes to the module root package
+  (public API), everything else into internal sub-packages. `MODULAR_BY_DOMAIN`:
+  `<base>.modules.<module>.<layer>`. Choose per project in the UI, with `PUT /strategy` or `--strategy`.
 * **Planning.** One entry per file with actions (`MOVE`, `REWRITE_PACKAGE`, `REWRITE_IMPORT`,
   `REWRITE_QUALIFIED_REFERENCE`, `KEEP`, `EXCLUDE`, `MANUAL_REVIEW`), safety (`SAFE`, `SAFE_WITH_WARNING`,
   `MANUAL_REVIEW`, `UNSUPPORTED`) and risk. Path and class-name collisions, package-private access across
@@ -98,7 +121,8 @@ Every phase returns a structured result; nothing in the pipeline communicates th
   the original text so formatting, comments and line endings are preserved. See
   [docs/TRANSFORMATION_ENGINE.md](docs/TRANSFORMATION_ENGINE.md).
 * **Validation.** Filesystem → Java parsing → package consistency → import resolution → dependency graph
-  preservation → architecture rules → Maven build (allowlisted command, sandboxed child process).
+  preservation → architecture rules (every cross-module dependency must target the other module's API
+  package; module cycles reported) → Maven build (allowlisted command, sandboxed child process).
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -160,6 +184,7 @@ Upload `/tmp/spring-layered.zip` in the UI (*New analysis*), or use the CLI / AP
 bin/archmorph analyze   project.zip [--report-dir DIR]
 bin/archmorph plan      project.zip [--report-dir DIR]
 bin/archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
+                        [--strategy modular-monolith|modular-by-domain]
 ```
 
 Exit codes: `0` success, `1` failure (e.g. the archive was rejected), `2` usage error,
@@ -178,6 +203,8 @@ curl -s $H/jobs/$JOB                                             # poll until CO
 curl -s $H/projects/$P/modules
 curl -s -X PUT -H 'Content-Type: application/json' \
      -d '{"edits":[{"type":"RENAME_MODULE","module":"payment","newName":"billing"}]}' $H/projects/$P/modules
+curl -s -X PUT -H 'Content-Type: application/json' \
+     -d '{"strategy":"MODULAR_MONOLITH"}' $H/projects/$P/strategy  # the default; or MODULAR_BY_DOMAIN
 curl -s -X POST "$H/projects/$P/transform?dryRun=true"           # in memory, nothing written
 curl -s -X POST $H/projects/$P/transform                         # job: transform + validate
 curl -s $H/projects/$P/validation
@@ -199,7 +226,8 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.workspace.root` / `retention` | `./workspace` / `PT24H` | where projects live and how long |
 | `archmorph.analysis.max-java-files` / `timeout` | `10000` / `PT5M` | analysis limits |
 | `archmorph.module-discovery.*-weight` | see file | affinity weights (normalised) |
-| `archmorph.transformation.modules-package` / `shared-package` | `modules` / `shared` | target layout names |
+| `archmorph.transformation.strategy` | `MODULAR_MONOLITH` | default target layout (`MODULAR_BY_DOMAIN` for package-by-module) |
+| `archmorph.transformation.modules-package` / `shared-package` | `modules` / `shared` | package names (`modules` is used by `MODULAR_BY_DOMAIN` only) |
 | `archmorph.validation.build.enabled` | `true` | run the sandboxed Maven build level |
 | `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`, tests skipped) or `TEST` |
 | `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and isolated repository |
@@ -254,8 +282,12 @@ cd frontend && npm run typecheck && npm run build
   low-confidence suggestions that need editing.
 * Strings are not code: reflection (`Class.forName("…")`), SpEL, `@ComponentScan` string packages,
   `application.properties`, XML and MyBatis mappers that mention moved names are **reported** (resource
-  findings, risk flags) but not rewritten.
-* Moving a class never fixes design problems: cycles and shared → module dependencies are reported only.
+  findings, risk flags) but not rewritten. A class named in a resource file (e.g. an OpenAPI spec) stays in place.
+* Moving a class never fixes design problems: module cycles (bidirectional JPA relations, facades over
+  several modules) and shared → module dependencies are reported, not refactored. A module's public API is
+  the set of types other modules use *today*; ArchMorph never changes visibility, introduces interfaces or
+  events, or splits classes.
+* ArchMorph does not add Spring Modulith to your build; `MODULES.md` shows the dependency and test to add.
 * Validation proves structural consistency and (optionally) compilation, not behavioural equivalence.
 * State is in memory: restarting the server forgets projects (files are cleaned up by retention).
   One instance only; rate limits are per instance.

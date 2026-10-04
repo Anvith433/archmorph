@@ -35,6 +35,7 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/architecture` | current layers/packages vs proposed layout | `200` |
 | `GET` | `/projects/{projectId}/modules` | suggestion, user decisions, final modules | `200` |
 | `PUT` | `/projects/{projectId}/modules` | replace the list of user decisions; re-plans | `200` modules |
+| `PUT` | `/projects/{projectId}/strategy` | choose the target layout `{"strategy": "MODULAR_MONOLITH" \| "MODULAR_BY_DOMAIN"}`; re-plans | `200` plan |
 | `GET` | `/projects/{projectId}/plan` | transformation plan | `200` |
 | `GET` | `/projects/{projectId}/diff/{entryId}` | before/after and unified diff for one plan entry | `200` |
 | `POST` | `/projects/{projectId}/transform?dryRun=true` | rewrite everything in memory; nothing written | `200` |
@@ -43,6 +44,9 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/validation` | validation report | `200` |
 | `GET` | `/projects/{projectId}/download` | transformed project as ZIP | `200 application/zip` |
 | `GET` | `/projects/{projectId}/reports/{name}` | one report file | `200` |
+
+The downloaded project contains `MODULES.md` (module map, public APIs, dependencies, Spring Modulith
+verification test).
 
 Report names: `analysis.json`, `analysis.md`, `modules.json`, `transformation-plan.json`,
 `transformation-summary.md`, `validation.json`, `validation-report.md`.
@@ -146,19 +150,21 @@ Categories: `BUSINESS_MODULE`, `SHARED`, `INFRASTRUCTURE`, `CONFIGURATION`, `SEC
 {
   "id": "e-0019", "scope": "MAIN", "className": "OrderService",
   "sourcePath": "src/main/java/com/demo/service/OrderService.java",
-  "targetPath": "src/main/java/com/demo/modules/order/service/OrderService.java",
-  "sourcePackage": "com.demo.service", "targetPackage": "com.demo.modules.order.service",
+  "targetPath": "src/main/java/com/demo/order/OrderService.java",
+  "sourcePackage": "com.demo.service", "targetPackage": "com.demo.order",
   "module": "order", "folder": "service",
   "actions": ["MOVE", "REWRITE_IMPORT", "REWRITE_PACKAGE", "REWRITE_QUALIFIED_REFERENCE"],
   "safety": "SAFE", "risk": "LOW", "confidence": 0.9,
-  "rewrites": ["rewrite package com.demo.service → com.demo.modules.order.service",
+  "rewrites": ["rewrite package com.demo.service → com.demo.order",
                "update imports (3 project types affected)", "rewrite 2 fully-qualified reference(s)"],
   "reasons": [],
-  "classes": [ { "source": "com.demo.service.OrderService", "target": "com.demo.modules.order.service.OrderService", "nested": false } ]
+  "classes": [ { "source": "com.demo.service.OrderService", "target": "com.demo.order.OrderService", "nested": false } ]
 }
 ```
 
-The plan adds `strategy`, `basePackage`, `fingerprint`, `summary` (files, moved, kept, excluded, manualReview,
+With the default `MODULAR_MONOLITH` strategy `OrderService` lands in the module root `com.demo.order`
+because another module (payment) uses it; a class used only inside its module would land in
+`com.demo.order.service`. The plan adds `strategy`, `basePackage`, `fingerprint`, `summary` (files, moved, kept, excluded, manualReview,
 unsupported, safe, safeWithWarning, conflicts, rewrites), `conflicts` (`{type, target, sources, resolution}`),
 `warnings`, `resourceFindings` (`{file, line, reference, snippet}`), `layout` and `classMap`.
 
@@ -213,7 +219,7 @@ Example:
 ## Rate limits
 
 Per client and minute (configurable under `archmorph.security.rate-limit.*`): uploads 10, expensive
-operations (analyze, transform, validate, module edits) 30, downloads 60, everything else 600. Exceeding a
+operations (analyze, transform, validate, module edits, strategy changes) 30, downloads 60, everything else 600. Exceeding a
 budget returns `429` with `Retry-After`.
 
 ## Session

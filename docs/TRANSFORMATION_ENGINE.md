@@ -19,13 +19,47 @@ DefaultTransformationEngine ──▶ SourceRewriter per file ──▶ transfor
 
 ## 1. Target architecture
 
-`TargetArchitecture` is a strategy; `MODULAR_BY_DOMAIN` is implemented:
+`TargetArchitecture` is a strategy with two implementations, chosen per project
+(`archmorph.transformation.strategy`, `PUT /projects/{id}/strategy`, `--strategy`).
+
+### MODULAR_MONOLITH (default)
+
+```
+<base>                                 @SpringBootApplication class (never moved) and application wiring
+<base>.<module>                        the module's public API: the classes other modules use
+<base>.<module>.{controller|service|repository|entity|dto|exception|component|common}   internals
+<base>.shared                          shared API: shared classes used by modules
+<base>.shared.{config|security|exception|infrastructure|common}                          shared internals
+```
+
+This is the layout [Spring Modulith](https://spring.io/projects/spring-modulith) expects: every direct
+sub-package of the application package is a module, and only the module's base package is accessible to other
+modules. Placement depends on the dependency graph. The planner computes the **exposed types**: every class
+that a class of a *different* module (or shared/application code) depends on. Exposed classes go to the module
+root, the rest into the folder for their role. ArchMorph never changes visibility, so a module's public API is
+exactly the set of types other modules use today.
+
+**Application wiring.** A shared class that depends on business modules but that no module uses (a global
+`@RestControllerAdvice` handling module exceptions, a `UserDetailsService` implementation backed by a module
+repository) would create a shared ↔ module cycle. It is placed directly in `<base>`, which belongs to no
+module. Shared code that modules *also* use stays in shared and the cycle is reported.
+
+**Verification.** Validation level 6 checks that every dependency between modules targets the other module's
+API package and reports module cycles. The generated `MODULES.md` contains the Spring Modulith test
+(`ApplicationModules.of(App.class).verify()`) to keep the boundaries checked in the project's own build. On the
+`spring-layered` fixture the transformed project passes that verification.
+
+### MODULAR_BY_DOMAIN
 
 ```
 <base>.modules.<module>.{controller|service|repository|entity|dto|exception|component|common}
 <base>.shared.{config|security|exception|infrastructure|common}
-<base>                     the @SpringBootApplication class stays where it is
+<base>                     the @SpringBootApplication class and application wiring
 ```
+
+Package-by-module without API/internal separation.
+
+### Common rules
 
 * `<base>` is the longest common package prefix of all production classes (`DefaultBasePackageResolver`);
   for a conventional Spring Boot project that is the application class's package.
@@ -98,6 +132,9 @@ fires (each pass only demotes, so the loop terminates):
    package is demoted.
 4. **String literals**: a string literal that names a project class keeps that class in place; a literal that
    names a project package flags its file.
+5. **Resource references**: a class whose fully-qualified name appears in a resource file (an OpenAPI spec
+   naming a validation annotation, `spring.factories`, XML bean definitions) stays in place, because resource
+   files are not rewritten and the build or runtime would look for it at the old location.
 
 ### 3.4 Tests and resources
 
@@ -147,7 +184,7 @@ whitespace around changed imports, did not update Javadoc references, and — th
 kept old qualified type names in some local variable declarations; the dependency-preservation validator
 caught it on the multi-package fixture. AST-located text edits avoid all three.
 
-### 4.3 Example (from the `spring-layered` fixture)
+### 4.3 Example (from the `spring-layered` fixture, `MODULAR_BY_DOMAIN` layout)
 
 ```diff
 --- a/src/main/java/com/demo/service/OrderService.java
@@ -167,6 +204,27 @@ caught it on the multi-package fixture. AST-located text edits avoid all three.
  ...
 -    public com.demo.dto.OrderDto create(com.demo.dto.OrderDto dto) {
 +    public com.demo.modules.order.dto.OrderDto create(com.demo.modules.order.dto.OrderDto dto) {
+```
+
+The same file with the default `MODULAR_MONOLITH` layout. `OrderService` and `Order` are used by the payment
+module, so both form order's public API in `com.demo.order`. The import of `Order` disappears because the two
+classes now share a package, and `UserService` is imported from the user module's API:
+
+```diff
+-package com.demo.service;
++package com.demo.order;
+
+-import static com.demo.common.AppConstants.DEFAULT_CURRENCY;
++import static com.demo.shared.AppConstants.DEFAULT_CURRENCY;
+
+-import com.demo.entity.Order;
+-import com.demo.repository.OrderRepository;
++import com.demo.order.repository.OrderRepository;
++import com.demo.user.UserService;
+ import org.springframework.stereotype.Service;
+ ...
+-    public com.demo.dto.OrderDto create(com.demo.dto.OrderDto dto) {
++    public com.demo.order.dto.OrderDto create(com.demo.order.dto.OrderDto dto) {
 ```
 
 Wildcard import split (golden case `wildcard-imports`):
@@ -199,6 +257,11 @@ import block, untouched file). Regenerate with `-Dgolden.update=true` and review
 
 ## 5. Execution
 
+After the files are written, `ModuleDocumentation` adds `MODULES.md` to the transformed project (or
+`ARCHMORPH-MODULES.md` if the project already has one). It lists every module, its package, public API,
+internal packages, the modules it depends on and through which types, review notes, the files kept in place,
+and how to verify the boundaries. The content is deterministic.
+
 `DefaultTransformationEngine.execute` writes into `transformed/` only; `original/` and the uploaded archive
 are never modified. Every planned file is written exactly once; non-Java files are copied. `dryRun` runs the
 same rewriting in memory and returns per-file changes (package changed, import changes, qualified rewrites,
@@ -217,8 +280,9 @@ Checked by `TransformationInvariantsTest` on every fixture and by the validation
 * **No duplication**: a shared class exists once.
 * **Originals untouched**, **deterministic output** (same input and decisions → byte-identical result and
   the same plan fingerprint).
-* On the fixtures, the transformed sources compile (in-JVM compiler in tests; sandboxed Maven in
-  `EndToEndMavenTest`).
+* On the fixtures, the transformed sources compile in **both** layouts (in-JVM compiler in tests; sandboxed
+  Maven in `EndToEndMavenTest`).
+* **Module encapsulation** (`MODULAR_MONOLITH`): no class uses an internal class of another module.
 
 ## 7. Non-guarantees
 
