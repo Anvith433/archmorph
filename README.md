@@ -189,7 +189,7 @@ Upload `/tmp/spring-layered.zip` in the UI (*New analysis*), or use the CLI / AP
 bin/archmorph analyze   project.zip [--report-dir DIR]
 bin/archmorph plan      project.zip [--report-dir DIR]
 bin/archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
-                        [--strategy modular-monolith|modular-by-domain]
+                        [--strategy modular-monolith|modular-by-domain] [--add-modulith-test]
 ```
 
 Exit codes: `0` success, `1` failure (e.g. the archive was rejected), `2` usage error,
@@ -232,6 +232,7 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.analysis.max-java-files` / `timeout` | `10000` / `PT5M` | analysis limits |
 | `archmorph.module-discovery.*-weight` | see file | affinity weights (normalised) |
 | `archmorph.transformation.strategy` | `MODULAR_MONOLITH` | default target layout (`MODULAR_BY_DOMAIN` for package-by-module) |
+| `archmorph.transformation.add-modulith-verification` / `modulith-version` | `false` / derived | add Spring Modulith's test dependency and `ModularityTests` to the output; the version is derived from Spring Boot (4.1 → 2.1.1, 4.0 → 2.0.8, 3.5 → 1.4.13, …) unless set |
 | `archmorph.transformation.modules-package` / `shared-package` | `modules` / `shared` | package names (`modules` is used by `MODULAR_BY_DOMAIN` only) |
 | `archmorph.validation.build.enabled` | `true` | run the sandboxed Maven build level |
 | `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`, tests skipped) or `TEST` |
@@ -292,7 +293,8 @@ cd frontend && npm run typecheck && npm run build
   several modules) and shared → module dependencies are reported, not refactored. A module's public API is
   the set of types other modules use *today*; ArchMorph never changes visibility, introduces interfaces or
   events, or splits classes.
-* ArchMorph does not add Spring Modulith to your build; `MODULES.md` shows the dependency and test to add.
+* Spring Modulith is only added to your build when you ask for it (Plan page checkbox,
+  `addModulithVerification`, `--add-modulith-test`); fetching it needs network access or a local Maven mirror.
 * Validation proves structural consistency and (optionally) compilation, not behavioural equivalence.
 * State is in memory: restarting the server forgets projects (files are cleaned up by retention).
   One instance only; rate limits are per instance.

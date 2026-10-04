@@ -385,7 +385,7 @@ public class ApiMapper {
         return new PlanDtos.PlanDto(plan.getStrategy().name(), plan.getBasePackage(), plan.fingerprint(), summary, entries,
                 plan.getConflicts().stream().map(this::conflict).toList(), plan.getWarnings(),
                 plan.getResourceFindings().stream().map(f -> new PlanDtos.ResourceFindingDto(f.file(), f.line(), f.reference(), f.snippet())).toList(),
-                layout, new LinkedHashMap<>(plan.getClassMap()));
+                layout, new LinkedHashMap<>(plan.getClassMap()), plan.isModulithVerification(), List.copyOf(plan.getGeneratedFiles()));
     }
 
     private PlanDtos.PlanEntryDto entry(TransformationPlanEntry e) {

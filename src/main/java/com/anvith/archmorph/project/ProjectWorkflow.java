@@ -61,6 +61,7 @@ public class ProjectWorkflow {
     private final com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures;
     private final com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation;
     private final com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor;
+    private final com.anvith.archmorph.analysis.transformation.build.ModulithSetup modulithSetup;
     private final ArchMorphProperties properties;
 
     public ProjectWorkflow(ZipExtractionService extractor, ProjectAnalyzer analyzer, ModuleEditService editService,
@@ -69,6 +70,7 @@ public class ProjectWorkflow {
                            com.anvith.archmorph.analysis.transformation.target.TargetArchitectureResolver architectures,
                            com.anvith.archmorph.report.ModuleDocumentation moduleDocumentation,
                            com.anvith.archmorph.analysis.module.boundary.BoundaryAdvisor boundaryAdvisor,
+                           com.anvith.archmorph.analysis.transformation.build.ModulithSetup modulithSetup,
                            ArchMorphProperties properties) {
         this.extractor = extractor;
         this.analyzer = analyzer;
@@ -82,6 +84,7 @@ public class ProjectWorkflow {
         this.architectures = architectures;
         this.moduleDocumentation = moduleDocumentation;
         this.boundaryAdvisor = boundaryAdvisor;
+        this.modulithSetup = modulithSetup;
         this.properties = properties;
     }
 
@@ -142,7 +145,8 @@ public class ProjectWorkflow {
             session.setDecisions(edits);
             session.setFinalModules(result);
             invalidateTransformation(session);
-            session.setPlan(planner.plan(session.analysis().model(), session.analysis().graph(), result, strategyOf(session)));
+            session.setPlan(withOptions(session, planner.plan(session.analysis().model(), session.analysis().graph(), result,
+                    strategyOf(session))));
             reports.writePlan(session);
             session.setStatus(ProjectStatus.READY_FOR_REVIEW);
             return result;
@@ -153,20 +157,63 @@ public class ProjectWorkflow {
 
     /** Choose the target layout and re-plan. A completed transformation is invalidated. */
     public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy) {
+        return changeStrategy(session, strategy, null);
+    }
+
+    /** @param modulithVerification add Spring Modulith verification; null keeps the current choice */
+    public TransformationPlan changeStrategy(ProjectSession session, TargetStrategy strategy, Boolean modulithVerification) {
         ReentrantLock lock = session.lock();
         lock.lock();
         try {
             requireAnalysis(session);
             session.setStrategy(strategy);
+            if (modulithVerification != null) {
+                session.setModulithVerification(modulithVerification);
+            }
             invalidateTransformation(session);
             ModuleDiscoveryReport modules = session.finalModules() != null ? session.finalModules() : session.analysis().suggestion();
-            TransformationPlan plan = planner.plan(session.analysis().model(), session.analysis().graph(), modules, strategy);
+            TransformationPlan plan = withOptions(session, planner.plan(session.analysis().model(), session.analysis().graph(),
+                    modules, strategy));
             session.setPlan(plan);
             reports.writePlan(session);
             session.setStatus(ProjectStatus.READY_FOR_REVIEW);
             return plan;
         } finally {
             lock.unlock();
+        }
+    }
+
+    private TransformationPlan withOptions(ProjectSession session, TransformationPlan plan) {
+        boolean wanted = session.modulithVerification() != null ? session.modulithVerification()
+                : properties.getTransformation().isAddModulithVerification();
+        plan.setModulithVerification(wanted && plan.getStrategy() == TargetStrategy.MODULAR_MONOLITH);
+        return plan;
+    }
+
+    /** Spring Modulith dependency and ModularityTests in the transformed project, when requested. */
+    private void addModulithVerification(ProjectSession session) {
+        TransformationPlan plan = session.plan();
+        if (!plan.isModulithVerification()) {
+            return;
+        }
+        String application = session.analysis().model().mainTopLevelTypes().stream()
+                .filter(t -> t.getComponentType() == com.anvith.archmorph.parser.ComponentType.APPLICATION)
+                .map(t -> plan.getClassMap().getOrDefault(t.getQualifiedName(), t.getQualifiedName()))
+                .sorted().findFirst().orElse(null);
+        try {
+            var result = modulithSetup.apply(session.workspace().transformed(), application,
+                    properties.getTransformation().getModulithVersion());
+            if (result.testFile() != null && !plan.getGeneratedFiles().contains(result.testFile())) {
+                plan.getGeneratedFiles().add(result.testFile());
+            }
+            if (result.pomUpdated()) {
+                plan.getWarnings().add("Spring Modulith " + (result.modulithVersion() == null ? "" : result.modulithVersion() + " ")
+                        + "was added to pom.xml (test scope) with " + (result.testFile() == null ? "no test" : result.testFile())
+                        + "; `mvn test` now verifies the module boundaries.");
+            }
+            plan.getWarnings().addAll(result.warnings());
+        } catch (java.io.IOException e) {
+            throw new com.anvith.archmorph.common.exception.WorkspaceCreationException("Unable to add Spring Modulith verification.", e);
         }
     }
 
@@ -276,6 +323,7 @@ public class ProjectWorkflow {
             progress.onEvent(ProgressEvent.TRANSFORMATION_STARTED, "Generating the modular project");
             TransformationResult result = engine.execute(session.analysis().model(), session.plan(), session.workspace().transformed());
             writeModuleDocumentation(session);
+            addModulithVerification(session);
             deadline.check();
             session.lock().lock();
             try {
@@ -337,7 +385,7 @@ public class ProjectWorkflow {
         AnalysisResult analysis = session.analysis();
         ModuleDiscoveryReport modules = editService.apply(analysis.suggestion(), session.decisions(), analysis.graph());
         session.setFinalModules(modules);
-        TransformationPlan plan = planner.plan(analysis.model(), analysis.graph(), modules, strategyOf(session));
+        TransformationPlan plan = withOptions(session, planner.plan(analysis.model(), analysis.graph(), modules, strategyOf(session)));
         session.setPlan(plan);
         progress.onEvent(ProgressEvent.PLAN_CREATED, plan.getEntries().size() + " files planned, " + plan.movedCount() + " to move");
     }

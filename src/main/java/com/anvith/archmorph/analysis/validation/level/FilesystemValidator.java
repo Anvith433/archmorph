@@ -50,6 +50,8 @@ public class FilesystemValidator implements LevelValidator {
             }
         }
 
+        expectedJava.addAll(context.plan().getGeneratedFiles());
+
         Set<String> actualJava = new HashSet<>();
         Set<String> actualOther = new HashSet<>();
         try (Stream<Path> stream = Files.walk(root)) {

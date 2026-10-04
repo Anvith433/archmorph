@@ -228,23 +228,40 @@ class ProjectApiIntegrationTest {
         assertThat(proposed.get("strategy").asString()).isEqualTo("MODULAR_MONOLITH");
         assertThat(proposed.get("modules").toString()).contains("(api)");
 
+        HttpResponse<String> modulith = api.send("PUT", p + "/strategy",
+                "{\"strategy\":\"MODULAR_MONOLITH\",\"addModulithVerification\":true}");
+        assertThat(modulith.statusCode()).as(modulith.body()).isEqualTo(200);
+        assertThat(api.data(modulith).get("modulithVerification").asBoolean()).isTrue();
+
         JsonNode job = api.awaitJob(api.data(api.send("POST", p + "/transform", null)).get("jobId").asString());
         assertThat(job.get("status").asString()).as(job.toString()).isEqualTo("COMPLETED");
+        assertThat(api.data(api.get(p + "/plan")).get("generatedFiles").toString()).contains("src/test/java/com/demo/ModularityTests.java");
         JsonNode validation = api.data(api.get(p + "/validation"));
         for (JsonNode level : validation.get("levels")) {
+            if (level.get("level").asString().equals("FILESYSTEM")) {
+                assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
+            }
             if (level.get("level").asString().equals("ARCHITECTURE_RULES")) {
                 assertThat(level.get("status").asString()).as(level.toString()).isEqualTo("PASS");
             }
         }
 
         String modulesMd = null;
+        String pom = null;
+        String modularityTest = null;
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(api.getBytes(p + "/download").body()))) {
             for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
-                if (entry.getName().equals("MODULES.md")) {
-                    modulesMd = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                String content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                switch (entry.getName()) {
+                    case "MODULES.md" -> modulesMd = content;
+                    case "pom.xml" -> pom = content;
+                    case "src/test/java/com/demo/ModularityTests.java" -> modularityTest = content;
+                    default -> { }
                 }
             }
         }
+        assertThat(pom).contains("<artifactId>spring-modulith-bom</artifactId>", "<artifactId>spring-modulith-starter-test</artifactId>");
+        assertThat(modularityTest).contains("ApplicationModules.of(DemoApplication.class).verify();");
         assertThat(modulesMd).isNotNull()
                 .contains("# Modules of shop", "## user", "**Public API** (used by other modules): `User`",
                         "ApplicationModules.of(DemoApplication.class).verify()");

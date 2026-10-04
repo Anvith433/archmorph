@@ -317,6 +317,8 @@ export interface Plan {
   resourceFindings: { file: string; line: number; reference: string; snippet: string }[];
   layout: string[];
   classMap: Record<string, string>;
+  modulithVerification: boolean;
+  generatedFiles: string[];
 }
 
 export interface FileChange {

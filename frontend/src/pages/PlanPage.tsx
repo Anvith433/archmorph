@@ -49,13 +49,13 @@ export function PlanPage() {
     }
   };
 
-  const chooseStrategy = async (strategy: TargetStrategy) => {
+  const chooseStrategy = async (strategy: TargetStrategy, addModulithVerification?: boolean) => {
     setPendingStrategy(strategy);
     setBusy('strategy');
     setError(undefined);
     setDryRun(undefined);
     try {
-      await api.changeStrategy(projectId, strategy);
+      await api.changeStrategy(projectId, strategy, addModulithVerification);
       refresh();
     } catch (e) {
       setError(e);
@@ -105,7 +105,26 @@ export function PlanPage() {
 
       {error !== undefined && <ErrorPanel error={error} />}
 
-      <StrategyPicker value={pendingStrategy ?? p.strategy} disabled={busy !== null || !canTransform} onChange={chooseStrategy} />
+      <StrategyPicker value={pendingStrategy ?? p.strategy} disabled={busy !== null || !canTransform} onChange={(s) => chooseStrategy(s)} />
+      {p.strategy === 'MODULAR_MONOLITH' && (
+        <label className="flex items-start gap-2 rounded-lg border border-line bg-panel p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={p.modulithVerification}
+            disabled={busy !== null || !canTransform}
+            onChange={(e) => void chooseStrategy(p.strategy, e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-fg">Keep the boundaries verified with Spring Modulith</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              Adds <code className="font-mono">spring-modulith-starter-test</code> (test scope, version matched to your Spring Boot) to
+              pom.xml and a <code className="font-mono">ModularityTests</code> class, so <code className="font-mono">mvn test</code> fails
+              when a module uses another module's internals or modules depend on each other in a cycle.
+            </span>
+          </span>
+        </label>
+      )}
 
       {project?.capabilities.manualReviewRequired && (
         <div role="note" className="rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-fg">

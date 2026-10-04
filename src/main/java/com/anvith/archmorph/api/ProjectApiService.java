@@ -203,10 +203,10 @@ public class ProjectApiService {
 
     public PlanDtos.PlanDto changeStrategy(String projectId,
                                            com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy,
-                                           String clientId) {
+                                           Boolean addModulithVerification, String clientId) {
         ProjectSession session = analysed(projectId, clientId);
         requireIdle(session);
-        workflow.changeStrategy(session, strategy);
+        workflow.changeStrategy(session, strategy, addModulithVerification);
         return mapper.plan(session.plan(), session.finalModules());
     }
 

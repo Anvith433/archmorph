@@ -35,7 +35,7 @@ Identifiers are server-generated UUIDs; plan entries use `e-NNNN`. Malformed ide
 | `GET` | `/projects/{projectId}/architecture` | current layers/packages vs proposed layout | `200` |
 | `GET` | `/projects/{projectId}/modules` | suggestion, user decisions, final modules | `200` |
 | `PUT` | `/projects/{projectId}/modules` | replace the list of user decisions; re-plans | `200` modules |
-| `PUT` | `/projects/{projectId}/strategy` | choose the target layout `{"strategy": "MODULAR_MONOLITH" \| "MODULAR_BY_DOMAIN"}`; re-plans | `200` plan |
+| `PUT` | `/projects/{projectId}/strategy` | choose the target layout `{"strategy": "MODULAR_MONOLITH" \| "MODULAR_BY_DOMAIN", "addModulithVerification": true}` (the flag is optional); re-plans | `200` plan |
 | `GET` | `/projects/{projectId}/plan` | transformation plan | `200` |
 | `GET` | `/projects/{projectId}/diff/{entryId}` | before/after and unified diff for one plan entry | `200` |
 | `POST` | `/projects/{projectId}/transform?dryRun=true` | rewrite everything in memory; nothing written | `200` |

@@ -42,7 +42,7 @@ import com.anvith.archmorph.analysis.transformation.target.TargetStrategy;
  * archmorph plan      project.zip [--report-dir DIR]
  * archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
  *
- * options: --strategy modular-monolith (default) | modular-by-domain
+ * options: --strategy modular-monolith (default) | modular-by-domain, --add-modulith-test
  * </pre>
  * Exit codes: 0 success, 1 failure, 2 usage error, 3 transformed but validation failed.
  */
@@ -93,11 +93,13 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         Path output = null;
         Path reportDir = null;
         TargetStrategy strategy = null;
+        Boolean modulith = null;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--output" -> output = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--report-dir" -> reportDir = i + 1 < args.length ? Path.of(args[++i]) : null;
                 case "--no-build" -> properties.getValidation().getBuild().setEnabled(false);
+                case "--add-modulith-test" -> modulith = true;
                 case "--strategy" -> {
                     strategy = i + 1 < args.length ? parseStrategy(args[++i]) : null;
                     if (strategy == null) {
@@ -130,7 +132,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
 
         ProjectWorkspace workspace = workspaceManager.create();
         try {
-            return run(command, zip, output, reportDir, strategy, workspace);
+            return run(command, zip, output, reportDir, strategy, modulith, workspace);
         } catch (ArchMorphException e) {
             out.println("Failed: " + e.getMessage());
             if (e.getHint() != null) {
@@ -155,12 +157,13 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
         return null;
     }
 
-    private int run(String command, Path zip, Path output, Path reportDir, TargetStrategy strategy,
+    private int run(String command, Path zip, Path output, Path reportDir, TargetStrategy strategy, Boolean modulith,
                     ProjectWorkspace workspace) throws IOException {
         Files.copy(zip, workspace.archive(), StandardCopyOption.REPLACE_EXISTING);
         ProjectSession session = new ProjectSession(workspace, FilenameSanitizer.displayName(zip.getFileName().toString()),
                 "cli", Files.size(zip));
         session.setStrategy(strategy);
+        session.setModulithVerification(modulith);
         ProgressListener progress = (event, detail) -> out.println("  [" + event + "] " + detail);
 
         out.println("Analysing " + session.displayName() + " ...");
@@ -254,6 +257,7 @@ public class CliRunner implements ApplicationRunner, ExitCodeGenerator {
                 Options:
                   --strategy modular-monolith   module root = public API, sub-packages internal (default)
                   --strategy modular-by-domain  <base>.modules.<module>.<layer>, no API separation
+                  --add-modulith-test           add Spring Modulith's test dependency and a ModularityTests class
 
                 The original archive is never modified. See docs/API.md and README.md.""");
     }

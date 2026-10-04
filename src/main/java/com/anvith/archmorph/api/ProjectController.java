@@ -108,7 +108,7 @@ public class ProjectController {
                                                         @Valid @RequestBody PlanDtos.ChangeStrategyRequest body,
                                                         HttpServletRequest request) {
         return ApiResponse.ok("Target architecture changed; plan rebuilt",
-                service.changeStrategy(projectId, body.strategy(), clients.resolve(request)));
+                service.changeStrategy(projectId, body.strategy(), body.addModulithVerification(), clients.resolve(request)));
     }
 
     @GetMapping("/projects/{projectId}/plan")

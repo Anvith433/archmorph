@@ -107,6 +107,13 @@ public class ArchMorphProperties {
         /** Target layout. MODULAR_MONOLITH separates each module's public API from its internals. */
         private com.anvith.archmorph.analysis.transformation.target.TargetStrategy strategy =
                 com.anvith.archmorph.analysis.transformation.target.TargetStrategy.MODULAR_MONOLITH;
+        /**
+         * MODULAR_MONOLITH only: add Spring Modulith's test dependency and a ModularityTests class to the
+         * transformed project, so its own build verifies the module boundaries.
+         */
+        private boolean addModulithVerification = false;
+        /** Spring Modulith version for that; blank derives it from the project's Spring Boot version. */
+        private String modulithVersion = "";
         /** Name of the package segment that holds business modules (MODULAR_BY_DOMAIN only). */
         private String modulesPackage = "modules";
         /** Name of the package segment that holds shared code. */

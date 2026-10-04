@@ -49,6 +49,15 @@ API package and reports module cycles. The generated `MODULES.md` contains the S
 (`ApplicationModules.of(App.class).verify()`) to keep the boundaries checked in the project's own build. On the
 `spring-layered` fixture the transformed project passes that verification.
 
+**Optional Spring Modulith setup.** With `addModulithVerification` (Plan page checkbox, API, `--add-modulith-test`,
+or `archmorph.transformation.add-modulith-verification`), `ModulithSetup` adds the `spring-modulith-bom` import and
+the `spring-modulith-starter-test` test dependency to `pom.xml` and writes `ModularityTests` next to the
+application class. The pom is edited by inserting text at element positions (`PomDocument`), so formatting,
+comments and line endings are preserved; nothing is added twice and no existing file is overwritten. The
+Spring Modulith version follows the project's Spring Boot line (or `archmorph.transformation.modulith-version`);
+for an unknown Spring Boot version nothing is changed and a warning explains why. The generated test is
+listed in the plan's `generatedFiles` and validated like every other file.
+
 ### MODULAR_BY_DOMAIN
 
 ```
