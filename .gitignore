@@ -33,7 +33,7 @@ build/
 .vscode/
 
 # ArchMorph generated workspace
-workspace/
+/workspace/
 
 # JVM crash logs
 hs_err_pid*.log
