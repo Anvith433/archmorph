@@ -117,6 +117,7 @@ class BuildSandboxTest {
 
     @Test
     void compilerErrorsAreParsedIntoIssuesWithProbableCauses() throws Exception {
+        properties.getValidation().getBuild().setCompareWithOriginal(false); // parsing only; original == transformed here
         fakeMaven("echo \"[ERROR] $(pwd)/src/main/java/com/x/A.java:[3,8] package com.y does not exist\"; exit 1");
         Path transformed = temp.resolve("t");
         ProjectModel model = Projects.model(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
@@ -187,6 +188,7 @@ class BuildSandboxTest {
 
     @Test
     void gradleCompilerErrorsAreParsed() throws Exception {
+        properties.getValidation().getBuild().setCompareWithOriginal(false); // parsing only; original == transformed here
         fakeGradle("echo \"$(pwd)/src/main/java/com/x/A.java:3: error: cannot find symbol\" >&2; echo 'FAILURE: Build failed' >&2; exit 1");
         properties.getValidation().getBuild().setGradleEnabled(true);
         Path transformed = temp.resolve("ge");
@@ -204,5 +206,64 @@ class BuildSandboxTest {
             assertThat(issue.line()).isEqualTo(3);
             assertThat(issue.message()).isEqualTo("cannot find symbol");
         });
+    }
+
+    @Test
+    void eachCompilerErrorIsReportedOnce() throws Exception {
+        // Maven prints every compiler error twice: in the compiler output and in the "Failed to execute goal" summary
+        properties.getValidation().getBuild().setCompareWithOriginal(false);
+        fakeMaven("for i in 1 2; do echo \"[ERROR] $(pwd)/src/main/java/com/x/A.java:[3,8] cannot find symbol\"; done; exit 1");
+        Path transformed = temp.resolve("twice");
+        ProjectModel model = Projects.model(transformed, Map.of("com/x/A.java", "package com.x; public class A {}"));
+
+        BuildValidator.Outcome outcome = validator().validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s6")), () -> null),
+                temp.resolve("repo"));
+
+        assertThat(outcome.level().issues()).hasSize(1);
+        assertThat(outcome.level().summary()).isEqualTo("1 error(s), 0 warning(s)");
+    }
+
+    @Test
+    void errorsTheOriginalAlreadyHasAreNotBlamedOnTheTransformation() throws Exception {
+        // the same error in both builds (the transformed file moved, so only its name matches)
+        fakeMaven("echo \"[ERROR] $(pwd)/src/main/java/com/x/$( [ -d src/main/java/com/x/a ] && echo a/ )A.java:[3,8] cannot find symbol\"; exit 1");
+        Path original = temp.resolve("orig");
+        ProjectModel model = Projects.model(original, Map.of("com/x/A.java", "package com.x; public class A {}"));
+        Path transformed = temp.resolve("moved");
+        Projects.model(transformed, Map.of("com/x/a/A.java", "package com.x.a; public class A {}"));
+
+        BuildValidator.Outcome outcome = validator().validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s7")), () -> null),
+                temp.resolve("repo"));
+
+        assertThat(outcome.level().status()).isEqualTo(ValidationStatus.WARN);
+        assertThat(outcome.level().summary()).contains("original project already fails").contains("introduced none");
+        assertThat(outcome.level().issues()).singleElement()
+                .satisfies(issue -> assertThat(issue.probableCause()).contains("original project"));
+    }
+
+    @Test
+    void errorsOnlyTheTransformedProjectHasStayErrors() throws Exception {
+        // the original builds; the transformed copy (it has the moved file) does not
+        fakeMaven("if [ -d src/main/java/com/x/a ]; then echo \"[ERROR] $(pwd)/src/main/java/com/x/a/A.java:[3,8] cannot find symbol\"; exit 1; fi; echo ok");
+        Path original = temp.resolve("orig2");
+        ProjectModel model = Projects.model(original, Map.of("com/x/A.java", "package com.x; public class A {}"));
+        Path transformed = temp.resolve("moved2");
+        Projects.model(transformed, Map.of("com/x/a/A.java", "package com.x.a; public class A {}"));
+
+        BuildValidator.Outcome outcome = validator().validate(
+                new ValidationContext(model, null, null, null, transformed, Files.createDirectories(temp.resolve("s8")), () -> null),
+                temp.resolve("repo"));
+
+        assertThat(outcome.level().status()).isEqualTo(ValidationStatus.FAIL);
+        assertThat(outcome.level().summary()).contains("the original project builds");
+        assertThat(outcome.level().issues()).singleElement()
+                .satisfies(issue -> assertThat(issue.severity()).isEqualTo(ValidationIssue.Severity.ERROR));
+    }
+
+    private BuildValidator validator() {
+        return new BuildValidator(properties, new SandboxedMavenRunner(properties), new SandboxedGradleRunner(properties),
+                new BuildPluginGuard());
     }
 }

@@ -92,7 +92,12 @@ public class BuildValidator {
             BuildResult build = gradle
                     ? gradleRunner.run(projectDir, buildHome, gradleUserHome(mavenRepository), goal)
                     : runner.run(projectDir, buildHome, mavenRepository, goal);
-            return new Outcome(evaluate(build, started), build);
+            LevelResult result = evaluate(build, started);
+            if (result.status() == ValidationStatus.FAIL && !build.timedOut() && config.isCompareWithOriginal()
+                    && result.issues().stream().anyMatch(i -> i.file() != null)) {
+                result = compareWithOriginal(context, result, gradle, goal, mavenRepository, started);
+            }
+            return new Outcome(result, build);
         } catch (IOException | RuntimeException e) {
             log.warn("Build validation could not run: {}", e.getClass().getSimpleName());
             return new Outcome(LevelResult.skipped(level, "The build could not be started."), null);
@@ -122,20 +127,8 @@ public class BuildValidator {
                     String.join(" ", build.command()) + " succeeded in " + (build.durationMillis() / 1000.0) + " s", 0, List.of(), millis);
         }
 
-        List<ValidationIssue> issues = new ArrayList<>();
+        List<ValidationIssue> issues = new ArrayList<>(compilerIssues(build));
         String all = build.stdout() + "\n" + build.stderr();
-        Matcher javac = JAVAC_ERROR.matcher(all);
-        while (javac.find() && issues.size() < 50) {
-            String file = javac.group("file").replace("<project>/", "");
-            String message = javac.group("msg").trim();
-            issues.add(ValidationIssue.error(file, Integer.parseInt(javac.group("line")), message, probableCause(message)));
-        }
-        Matcher matcher = COMPILER_ERROR.matcher(all);
-        while (matcher.find() && issues.size() < 50) {
-            String file = matcher.group("file").replace("<project>/", "");
-            String message = matcher.group("msg").trim();
-            issues.add(ValidationIssue.error(file, Integer.parseInt(matcher.group("line")), message, probableCause(message)));
-        }
         if (issues.isEmpty()) {
             boolean resolution = all.contains("Could not resolve") || all.contains("Non-resolvable")
                     || all.contains("Could not GET") || all.contains("No cached version")
@@ -153,6 +146,80 @@ public class BuildValidator {
                     : "See the captured build output."));
         }
         return LevelResult.of(level, issues, "build succeeded", millis);
+    }
+
+    /**
+     * Compiler errors of a build, without duplicates: Maven prints every error twice (in the compiler output and
+     * again in the "Failed to execute goal" summary).
+     */
+    static List<ValidationIssue> compilerIssues(BuildResult build) {
+        java.util.Map<String, ValidationIssue> issues = new java.util.LinkedHashMap<>();
+        String all = build.stdout() + "\n" + build.stderr();
+        for (Pattern pattern : List.of(JAVAC_ERROR, COMPILER_ERROR)) {
+            Matcher matcher = pattern.matcher(all);
+            while (matcher.find() && issues.size() < 50) {
+                String file = matcher.group("file").replace("<project>/", "");
+                int line = Integer.parseInt(matcher.group("line"));
+                String message = matcher.group("msg").trim();
+                issues.putIfAbsent(file + ":" + line + ":" + message, ValidationIssue.error(file, line, message, probableCause(message)));
+            }
+        }
+        return List.copyOf(issues.values());
+    }
+
+    /**
+     * The transformed project failed to compile: build the original the same way and mark the errors it already had,
+     * so a failure the upload brought with it is not blamed on the transformation. Errors are matched by file name
+     * and message (line numbers move when imports change).
+     */
+    private LevelResult compareWithOriginal(ValidationContext context, LevelResult transformed, boolean gradle,
+                                            SandboxedMavenRunner.Goal goal, Path mavenRepository, long startedNanos)
+            throws IOException {
+        Path originalDir = context.scratch().resolve("original");
+        copyForBuild(context.original().structure().projectRoot(), originalDir);
+        Path home = context.scratch().resolve("home-original");
+        BuildResult baseline = gradle
+                ? gradleRunner.run(originalDir, home, gradleUserHome(mavenRepository), goal)
+                : runner.run(originalDir, home, mavenRepository, goal);
+        long millis = (System.nanoTime() - startedNanos) / 1_000_000;
+        ValidationLevel level = ValidationLevel.BUILD;
+        if (baseline.exitCode() == 0) {
+            return new LevelResult(level, ValidationStatus.FAIL, transformed.summary()
+                    + "; the original project builds, so these errors come from the transformation",
+                    transformed.issueCount(), transformed.issues(), millis);
+        }
+        java.util.Map<String, Integer> before = new java.util.HashMap<>();
+        for (ValidationIssue issue : compilerIssues(baseline)) {
+            before.merge(matchKey(issue), 1, Integer::sum);
+        }
+        if (before.isEmpty()) {
+            return transformed; // the original fails for another reason (e.g. dependencies); nothing to compare
+        }
+        List<ValidationIssue> issues = new ArrayList<>();
+        int preExisting = 0;
+        for (ValidationIssue issue : transformed.issues()) {
+            String key = matchKey(issue);
+            if (issue.severity() == ValidationIssue.Severity.ERROR && before.getOrDefault(key, 0) > 0) {
+                before.merge(key, -1, Integer::sum);
+                preExisting++;
+                issues.add(ValidationIssue.warning(issue.file(), issue.line(), issue.message(),
+                        "Already fails the same way in the original project; not caused by the transformation."));
+            } else {
+                issues.add(issue);
+            }
+        }
+        int introduced = issues.size() - preExisting;
+        if (introduced == 0) {
+            return new LevelResult(level, ValidationStatus.WARN, "the original project already fails to build with the same "
+                    + preExisting + " error(s); the transformation introduced none", issues.size(), List.copyOf(issues), millis);
+        }
+        return new LevelResult(level, ValidationStatus.FAIL, introduced + " error(s) introduced by the transformation; "
+                + preExisting + " already present in the original project", issues.size(), List.copyOf(issues), millis);
+    }
+
+    private static String matchKey(ValidationIssue issue) {
+        String file = issue.file() == null ? "" : issue.file().replace('\\', '/');
+        return file.substring(file.lastIndexOf('/') + 1) + "|" + issue.message();
     }
 
     static String probableCause(String message) {
