@@ -200,7 +200,7 @@ public class BoundaryAdvisor {
                                        Set<String> broken, Set<String> movedClasses) {
         for (String a : new TreeSet<>(component)) {
             for (Map.Entry<String, List<DependencyEdge>> target : current.getOrDefault(a, Map.of()).entrySet()) {
-                if (!component.contains(target.getKey()) || target.getValue().isEmpty()) {
+                if (!component.contains(target.getKey()) || target.getValue().isEmpty() || intended(target.getKey())) {
                     continue;
                 }
                 BoundarySuggestion move = moveSuggestion(a, target.getKey(), target.getValue(), modules, graph, moduleOf,
@@ -503,6 +503,14 @@ public class BoundaryAdvisor {
         }
     }
 
+    /**
+     * A dependency on shared code is the intended direction and is never the one to cut: in a shared ↔ module cycle
+     * the fix is to remove shared's dependency on the module.
+     */
+    private static boolean intended(String targetModule) {
+        return ModuleDiscoveryReport.SHARED.equals(targetModule);
+    }
+
     private static int cyclicModuleCount(Map<String, Map<String, List<DependencyEdge>>> graph) {
         return cyclicComponents(graph).stream().mapToInt(List::size).sum();
     }
@@ -515,7 +523,7 @@ public class BoundaryAdvisor {
         int bestCount = Integer.MAX_VALUE;
         for (String a : new TreeSet<>(component)) {
             for (Map.Entry<String, List<DependencyEdge>> target : graph.getOrDefault(a, Map.of()).entrySet()) {
-                if (!component.contains(target.getKey()) || target.getValue().isEmpty()) {
+                if (!component.contains(target.getKey()) || target.getValue().isEmpty() || intended(target.getKey())) {
                     continue;
                 }
                 double weight = target.getValue().stream().mapToDouble(e -> breakCost(e, facts)).sum();

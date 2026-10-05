@@ -278,6 +278,7 @@ variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding dro
 | `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`, tests skipped) or `TEST` |
 | `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and isolated repository |
 | `archmorph.validation.build.timeout` | `PT4M` | hard wall-clock limit, process tree killed |
+| `archmorph.validation.build.compare-with-original` | `true` | when the transformed project fails to build, build the original too and mark errors it already had (not blamed on the transformation) |
 | `archmorph.security.allowed-origins` | `http://localhost:5173` | CORS allowlist (never `*`) |
 | `archmorph.security.auth.mode` / `auth.users[n].username` / `auth.users[n].password-hash` | `NONE` / – / – | `BASIC` enables login; hashes from `archmorph hash-password` (bcrypt only) |
 | `archmorph.security.rate-limit.*` | enabled | per-client budgets for upload / expensive / download / general |

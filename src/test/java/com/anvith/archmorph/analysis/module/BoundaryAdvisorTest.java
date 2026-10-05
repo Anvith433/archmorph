@@ -85,4 +85,19 @@ class BoundaryAdvisorTest {
                 move.edit()), analysis.graph());
         assertThat(advisor.advise(fixed, analysis.graph(), analysis.facts()).acyclic()).isTrue();
     }
+
+    @Test
+    void aSharedToModuleCycleIsBrokenOnTheSharedSide() throws Exception {
+        AnalysisResult analysis = runner.analyze("spring-layered", temp);
+        // shared code that uses a module: order -> shared is intended, shared -> order is the edge to remove
+        ModuleDiscoveryReport edited = editService.apply(analysis.suggestion(), List.of(
+                new ModuleEdit(ModuleEdit.Type.MOVE_CLASS, null, null, "shared", null, "com.demo.service.OrderService", null)),
+                analysis.graph());
+
+        BoundaryReport report = advisor.advise(edited, analysis.graph(), analysis.facts());
+
+        assertThat(report.cycles()).anySatisfy(c -> assertThat(c).contains("order", "shared"));
+        assertThat(report.suggestions()).isNotEmpty()
+                .allSatisfy(s -> assertThat(s.to()).as("never cut a dependency on shared: " + s.title()).isNotEqualTo("shared"));
+    }
 }

@@ -142,6 +142,11 @@ public class ArchMorphProperties {
          * scripts are code that runs with ArchMorph's privileges.
          */
         private boolean gradleEnabled = false;
+        /**
+         * When the transformed project fails to compile, build the original as well and mark the errors it already
+         * had, so they are not blamed on the transformation (costs a second build, only on failure).
+         */
+        private boolean compareWithOriginal = true;
         private String gradleExecutable = "gradle";
         /** Shared Gradle dependency cache; blank uses &lt;workspace&gt;/gradle-home. */
         private String gradleUserHome = "";
