@@ -1,379 +1,490 @@
 # ArchMorph
 
-**Static-analysis-driven migration of layered Spring Boot applications to modular monoliths — with a human in the loop.**
+[![CI](https://github.com/Anvith433/archmorph/actions/workflows/ci.yml/badge.svg)](https://github.com/Anvith433/archmorph/actions/workflows/ci.yml)
 
-ArchMorph reads a Maven / Spring Boot project from a ZIP archive, reconstructs its architecture from the
-Java AST, proposes business modules, and produces a reviewable, deterministic transformation plan. After you
-review and adjust the plan, it rewrites packages, imports and qualified references with an AST-located
-rewriter, validates the result on seven levels (up to a sandboxed Maven compile), and gives you the
-transformed project plus JSON and Markdown reports.
+**Turn a layered Spring Boot application into a modular monolith: upload a ZIP, review the proposed
+modules, download the restructured project.**
+
+ArchMorph analyses a Java / Spring Boot project, works out its business modules, moves every class into
+the right module with safe, syntax-aware rewriting, checks that nothing broke, and gives you the result as a
+ZIP together with reports that explain every decision.
 
 ```
-layered                                      modular monolith
-com.demo.controller.OrderController          com.demo.order.controller.OrderController   (internal)
-com.demo.service.OrderService          ──▶   com.demo.order.OrderService                 (order's public API)
-com.demo.repository.OrderRepository          com.demo.order.repository.OrderRepository   (internal)
-com.demo.common.ApiResponse                  com.demo.shared.ApiResponse                 (shared API)
-com.demo.exception.GlobalExceptionHandler    com.demo.GlobalExceptionHandler             (application wiring)
+BEFORE: layered (grouped by technical type)     AFTER: modular monolith (grouped by business module)
+
+com.shop.controller.OrderController             com.shop.order.controller.OrderController   internal
+com.shop.controller.CustomerController          com.shop.order.OrderService                 order's public API
+com.shop.service.OrderService            ──▶    com.shop.order.repository.OrderRepository   internal
+com.shop.service.CustomerService                com.shop.customer.Customer                  customer's public API
+com.shop.repository.OrderRepository             com.shop.customer.controller.CustomerController
+com.shop.entity.Customer                        com.shop.shared.ApiResponse                 shared by all modules
+com.shop.common.ApiResponse                     com.shop.GlobalExceptionHandler             application wiring
 ```
 
-Each module's root package is its **public API** — the types other modules use — and its sub-packages are
-**internal**. This follows the [Spring Modulith](https://spring.io/projects/spring-modulith) conventions, so the
-result can be checked with `ApplicationModules.of(App.class).verify()`. The transformed project ships a
-`MODULES.md` describing every module, its API, its dependencies and that verification test.
-
-> **What ArchMorph is not.** It does not migrate an architecture fully automatically and it does not prove
-> that behaviour is preserved. Module boundaries are a design decision; ArchMorph gives you evidence,
-> confidence indicators and a safe mechanical transformation, and marks everything it cannot do safely as
-> *manual review required*. Run your own test suite on the result.
+> **Honest scope.** ArchMorph does the mechanical work and proposes a design; it is not a fully automatic
+> architecture migration. Module boundaries are a design decision for a person to review, and real design
+> problems in the code (for example two entities that reference each other across modules) are reported
+> with a suggested fix, not rewritten. Validation proves the result is consistent and compiles; run your own
+> tests to confirm behaviour.
 
 ---
 
 ## Contents
 
-- [Status](#status)
-- [How it works](#how-it-works)
-- [Quick start](#quick-start)
-- [Using the UI](#using-the-ui)
-- [Command line](#command-line)
-- [REST API](#rest-api)
-- [Configuration](#configuration)
-- [Security model](#security-model)
-- [Testing](#testing)
-- [Known limitations](#known-limitations)
-- [Project layout](#project-layout)
-- [Documentation](#documentation)
+1. [Why](#why)
+2. [Features](#features)
+3. [Quick start](#quick-start)
+4. [Convert your project, step by step](#convert-your-project-step-by-step)
+5. [What you get](#what-you-get)
+6. [How it works](#how-it-works)
+7. [The seven validation levels](#the-seven-validation-levels)
+8. [Command line](#command-line)
+9. [REST API](#rest-api)
+10. [Login (optional)](#login-optional)
+11. [Configuration](#configuration)
+12. [Security](#security)
+13. [Results on real projects](#results-on-real-projects)
+14. [How it compares to other tools](#how-it-compares-to-other-tools)
+15. [Limitations](#limitations)
+16. [Development](#development)
+17. [Project layout](#project-layout)
+18. [Troubleshooting](#troubleshooting)
+19. [Further documentation](#further-documentation)
 
-## Status
+---
 
-Working end to end for Maven projects with the conventional layered structure
-(`controller` / `service` / `repository` / `entity` / `dto` …), including multi-package, nested-type,
-generic, default-package and test-source cases covered by the fixture suite. Experimental for anything else.
-Treat every result as a proposal to review.
+## Why
 
-**Checked on real code:** [spring-petclinic-rest](https://github.com/spring-petclinic/spring-petclinic-rest)
-(109 Java files, Jdbc/Jpa/Spring Data variants, OpenAPI-generated DTOs, MapStruct). ArchMorph proposes the
-modules owner, pet, vet, visit, specialty and user, and flags `ClinicService` as a facade over all of them.
-The transformed project compiles and passes all 237 of its own tests. Spring Modulith's verifier still
-reports cycles there (bidirectional JPA relations such as Owner ↔ Pet, and the facade): those are design
-decisions that moving packages cannot make, and ArchMorph reports them as warnings. On the `spring-layered`
-fixture, the transformed project passes `ApplicationModules.verify()` as well as its tests.
+Most Spring Boot applications start **layered**: every controller in `controller`, every service in
+`service`, every repository in `repository`. That is easy at first, but as the application grows,
+everything can reach everything, and nobody can tell where "orders" end and "customers" begin.
 
-Also run on [spring-boot-realworld-example-app](https://github.com/gothinkster/spring-boot-realworld-example-app)
-(Gradle, ports and adapters, MyBatis, Netflix DGS GraphQL, Lombok; 116 files) and
-[jhipster-sample-app](https://github.com/jhipster/jhipster-sample-app) (Maven, JHipster layout; 136 files).
-Both transform with levels 1–6 passing and every original dependency preserved. On realworld the modules are
-article, comment, profile, tag and user, plus a low-confidence one-class `relation` module (the follow/unfollow
-mutation), flagged for review with the suggestion to merge it into user, the module it mostly uses; entities and mappers named in MyBatis XML stay in place for manual
-review, because moving them would break the mappers. On JHipster the modules are account, authority,
-bankaccount, label, operation and user; two different `EmailAlreadyUsedException` classes would collide in
-`shared`, so both are kept in place and reported as a conflict. Neither build was run here: realworld pins
-Gradle 7.4 / Spring Boot 2.6, which the server's Gradle 8 cannot build (the original fails the same way, and
-ArchMorph reports the pinned wrapper version), and JHipster declares node/npm build plugins that the build
-guard refuses. Lessons from these runs are captured in the `ports-and-adapters` fixture.
+A **modular monolith** is still one deployable application, but it is organised by business area. Each
+module (`order`, `customer`, `payment`…) keeps its internals private and exposes a small **public API** to
+the others. You get clear boundaries without the cost of microservices, and a good starting point if you
+ever want to split one out.
 
-| Area | State |
-|---|---|
-| Upload, safe extraction, workspace isolation | implemented, tested against Zip Slip, bombs, symlinks |
-| Parsing, classification with confidence + evidence | implemented (JavaParser, lenient, 13 component types) |
-| Semantic dependency graph (12 dependency kinds) | implemented, import-aware type resolution |
-| Layer rules, metrics, cycles (Tarjan) | implemented |
-| Module discovery, optimizer, user edits | implemented; heuristic by nature |
-| Deterministic planner (collisions, safety levels, demotion) | implemented |
-| AST-located source rewriter | implemented, golden-tested |
-| 7-level validation incl. sandboxed Maven (and opt-in Gradle) build | implemented |
-| Async jobs, REST API, rate limiting, security headers | implemented, single instance, in memory |
-| React review UI | implemented |
-| Modular monolith target (module API vs internals, Spring Modulith conventions) | implemented, default |
-| Package-by-module target (`modules.<module>.<layer>`) | implemented, selectable |
-| Multi-module Maven builds (nested aggregators) | implemented; classes move within their own Maven module |
-| Gradle builds (single and multi-project, Groovy or Kotlin DSL) | implemented; scripts are read, never evaluated; the Gradle build level is opt-in |
-| Kotlin, Groovy, Scala sources | **not rewritten** (preserved and reported) |
-| Optional login (HTTP Basic, bcrypt, per-user projects) | implemented, off by default (local mode) |
-| Docker image + hardened compose file | implemented (non-root, read-only, no capabilities, resource limits) |
+Restructuring by hand means moving hundreds of classes and fixing every package, import and qualified
+name, which is slow and error-prone. ArchMorph automates that part and gives you evidence for the parts that
+need a decision.
 
-## How it works
+## Features
 
-```
-ZIP ─▶ secure validation ─▶ isolated workspace ─▶ safe extraction ─▶ structure detection
-    ─▶ scanning ─▶ AST parsing ─▶ class registry ─▶ semantic dependencies ─▶ graph
-    ─▶ architecture analysis ─▶ cycles ─▶ module discovery ─▶ optimization ─▶ confidence
-    ─▶ target plan ─▶ transformation plan ─▶ (review & edit) ─▶ AST rewrite ─▶ generated project
-    ─▶ 7-level validation ─▶ reports ─▶ download
-```
+**Analysis**
+- Parses every Java class (JavaParser, Java 21 syntax) without running any of your code.
+- Classifies each class (controller, service, repository, entity, DTO, configuration, security…) with a
+  confidence score and the evidence behind it.
+- Builds a dependency graph of 12 dependency kinds (fields, constructors, method calls, inheritance, JPA
+  relationships, generics…), including getters generated by **Lombok**, record accessors and classes named in
+  **MapStruct** `java(...)` expressions.
+- Reports layer violations, package metrics and dependency cycles.
 
-Every phase returns a structured result; nothing in the pipeline communicates through console output.
+**Module discovery and review**
+- Proposes business modules from names, dependencies, entities and REST endpoints, each with a confidence
+  score and its reasons.
+- Code used by several modules goes to `shared` exactly once (never duplicated); application wiring (global
+  exception handlers, security configuration) stays at the application root.
+- Detects **module cycles** and suggests a concrete fix for each: move a misplaced class, split a "god"
+  service, make a two-way JPA relationship one-way, or invert a dependency with an interface or event.
+- Review UI: rename, merge, split, move, lock or exclude modules and classes, choose which classes form each
+  module's public API, undo. Reviews can be exported to a file and replayed later (also from the CLI).
 
-* **Parsing.** JavaParser 3.27 (Java 21 language level, lenient). Every top-level *and nested* type becomes
-  `ClassMetadata` with fields, methods, annotations, generics, imports, risk flags (reflection, string class
-  names, package-private API) and a source scope (main/test).
-* **Classification.** Layered evidence: stereotype annotations (0.95), framework inheritance (0.90),
-  structure (0.78), generic annotations (0.70), naming (0.65), package (0.50); agreement raises confidence,
-  conflicts lower it. Every classification carries its evidence list.
-* **Dependencies.** An import-aware resolver (FQN → same file → single import → same package → wildcard →
-  unique simple name, flagged low-confidence) feeds nine extractors producing `CONSTRUCTOR`, `FIELD`,
-  `METHOD_PARAMETER`, `METHOD_RETURN`, `METHOD_INVOCATION`, `OBJECT_CREATION`, `INHERITANCE`,
-  `IMPLEMENTATION`, `ANNOTATION`, `GENERIC`, `ENTITY_RELATIONSHIP` and `TYPE_REFERENCE` edges, each with
-  source location, occurrence count and confidence.
-* **Lombok and MapStruct.** Getters generated by Lombok (`@Data`, `@Getter`, `@Value`) and record accessors are
-  followed when the symbol solver cannot see them, so `order.getCustomer().getName()` still counts as a
-  dependency on `Customer`. Classes named inside MapStruct `expression`/`defaultExpression`/`conditionExpression`
-  `java(...)` strings are dependencies and are rewritten when they move (`constant` values are left alone).
-* **Analysis.** Layer rules with severity and rationale, Ca/Ce/instability per class, package style,
-  Tarjan strongly-connected components for cycles with severity and a recommendation.
-* **Modules.** A documented affinity model combines dependency strength, naming, package, entity,
-  endpoint and type-usage signals (weights configurable). Fixed roles (application, configuration,
-  security, exception handlers) never join a business module. Code used by several modules goes to
-  `shared` exactly once — **never duplicated**. Technology words (`Jdbc`, `Jpa`, `SpringData`, API versions)
-  are not mistaken for domains; base types extended by several modules go to `shared`; shared code that
-  depends on modules but is used by none (a global exception handler) becomes application wiring in the root
-  package. An optimizer merges fragments and emits warnings (singleton, oversized, low cohesion, high
-  coupling, facades).
-* **Module cycles.** Moving packages cannot remove a cycle that exists in the code, so ArchMorph proposes
-  how to break each one: move a misplaced class (simulated first; one click to apply), split a facade
-  method by method, make a bidirectional JPA association one-directional (naming the fields), or invert a
-  call dependency with an event or interface. The suggestions appear on the Modules page, in the API, the
-  CLI and `MODULES.md`.
-* **Target.** `MODULAR_MONOLITH` (default): a class used by another module goes to the module root package
-  (public API), everything else into internal sub-packages. `MODULAR_BY_DOMAIN`:
-  `<base>.modules.<module>.<layer>`. Choose per project in the UI, with `PUT /strategy` or `--strategy`.
-* **Planning.** One entry per file with actions (`MOVE`, `REWRITE_PACKAGE`, `REWRITE_IMPORT`,
-  `REWRITE_QUALIFIED_REFERENCE`, `KEEP`, `EXCLUDE`, `MANUAL_REVIEW`), safety (`SAFE`, `SAFE_WITH_WARNING`,
-  `MANUAL_REVIEW`, `UNSUPPORTED`) and risk. Path and class-name collisions, package-private access across
-  new package boundaries, default-package dependencies and leaving the component-scan root all demote a
-  move to *keep in place* — which is always compilable because every class keeps a unique FQN.
-* **Rewriting.** JavaParser decides *what* changes, AST node ranges decide *where*; edits are applied to
-  the original text so formatting, comments and line endings are preserved. See
-  [docs/TRANSFORMATION_ENGINE.md](docs/TRANSFORMATION_ENGINE.md).
-* **Validation.** Filesystem → Java parsing → package consistency → import resolution → dependency graph
-  preservation → architecture rules (every cross-module dependency must target the other module's API
-  package; module cycles reported) → Maven build (allowlisted command, sandboxed child process).
+**Transformation**
+- Two target layouts:
+  - `MODULAR_MONOLITH` (default): `<base>.<module>` is the public API, internals go into
+    `<base>.<module>.<folder>`. Follows the [Spring Modulith](https://spring.io/projects/spring-modulith)
+    conventions.
+  - `MODULAR_BY_DOMAIN`: `<base>.modules.<module>.<layer>`.
+- Rewrites packages, imports and fully-qualified references using the syntax tree, never with text
+  find-and-replace; formatting, comments and line endings are preserved.
+- Anything that cannot be moved safely (reflection, classes named in XML or OpenAPI files, name collisions,
+  package-private access) is **left in place and listed for manual review**, so the result still compiles.
+- Optionally adds Spring Modulith's test dependency and a `ModularityTests` class to the output.
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Validation and output**
+- Seven validation levels, up to a real (sandboxed) Maven or Gradle build of the result. If the build fails,
+  ArchMorph builds your original too and tells you which errors were already there.
+- Downloads: the transformed project as a ZIP (with a `MODULES.md` that documents every module), plus JSON and
+  Markdown reports.
+
+**Build tools and deployment**
+- Maven (single and multi-module, nested aggregators) and Gradle (single and multi-project, Groovy or Kotlin
+  DSL). Classes always stay inside their own Maven module or Gradle subproject.
+- Web UI, REST API and command line.
+- Docker image and a hardened `docker-compose.yml`; optional login with bcrypt-hashed passwords.
 
 ## Quick start
 
-### With Docker
+### Option 1: Docker (recommended)
+
+Requirements: [Docker](https://docs.docker.com/get-docker/) with Compose.
 
 ```bash
-docker compose up --build        # UI and API on http://localhost:8080
+git clone https://github.com/Anvith433/archmorph.git
+cd archmorph
+docker compose up --build
 ```
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for login, TLS and egress control.
+Open **http://localhost:8080**. The first build takes a few minutes (it downloads Maven and npm
+dependencies). Stop with `Ctrl+C`, or run it in the background with `docker compose up -d --build` and stop
+it with `docker compose down`.
 
-### From source
+> Port 8080 already in use? See [Troubleshooting](#troubleshooting).
 
-Requirements: **JDK 21**, **Maven 3.9+** (or the bundled `./mvnw`), **Node.js ≥ 20.19** with npm for the UI.
-Build validation additionally needs `mvn` on the `PATH` of the server.
+### Option 2: From source
 
-### Backend (API on http://localhost:8080)
+Requirements: **JDK 21**, **Maven 3.9+** (or the bundled `./mvnw`), **Node.js 20.19+** with npm. The build
+check additionally needs `mvn` on the `PATH`.
 
-```bash
-./mvnw spring-boot:run
-```
-
-### Frontend (dev server on http://localhost:5173, proxies `/api` to the backend)
-
-```bash
-cd frontend
-npm ci
-npm run dev
-```
-
-Set `ARCHMORPH_BACKEND=http://host:port` to proxy to a backend elsewhere.
-
-### Single process (UI bundled into the jar)
+Single process, UI bundled into the jar:
 
 ```bash
 (cd frontend && npm ci && npm run build)
 ./mvnw -Pui -DskipTests package
-java -jar target/archmorph-ai-0.0.1-SNAPSHOT.jar      # UI and API on http://localhost:8080
+java -jar target/archmorph-ai-0.0.1-SNAPSHOT.jar        # http://localhost:8080
 ```
 
-### Try it with a fixture
+Or for development, with hot reload:
 
 ```bash
-cd src/test/resources/fixtures/spring-layered && zip -qr /tmp/spring-layered.zip . -x expected.json && cd -
+./mvnw spring-boot:run                                   # API on http://localhost:8080
+cd frontend && npm ci && npm run dev                     # UI on http://localhost:5173 (proxies /api)
 ```
 
-Upload `/tmp/spring-layered.zip` in the UI (*New analysis*), or use the CLI / API below.
+On Windows use `mvnw.cmd` instead of `./mvnw`.
 
-## Using the UI
+### Try it with a sample project
 
-| Route | Screen |
+```bash
+cd src/test/resources/fixtures/spring-layered
+zip -qr ../../../../../spring-layered.zip . -x expected.json
+cd -
+```
+
+Upload `spring-layered.zip` in the UI. On Windows, right-click the `spring-layered` folder → *Send to* →
+*Compressed (zipped) folder*.
+
+## Convert your project, step by step
+
+1. **Zip your project.** The ZIP must contain the `pom.xml` (or `build.gradle` / `settings.gradle`) and
+   `src/`. Leave out `target/`, `build/` and `node_modules/` to keep it small (limit: 100 MB).
+2. **Upload it.** Open http://localhost:8080 → **New analysis** → choose the ZIP → **Analyze**. Nothing is
+   changed yet.
+3. **Look at the analysis.** *Overview* shows the numbers, cycles and layer violations; *Architecture* and
+   *Dependencies* show the current structure.
+4. **Review the modules.** On *Modules*, check the proposed modules. Rename, merge or split them, move
+   classes, and mark classes as public API or internal. Read the module cycles and suggested fixes. You can
+   **Export decisions** to keep your review.
+5. **Check the plan.** On *Plan*, choose the target layout, optionally tick *Spring Modulith verification*,
+   compare the two layouts, and read the per-file table: every move, what is kept for manual review and why.
+   **Dry run** shows the result without writing anything.
+6. **Transform.** Click **Transform & validate**. ArchMorph generates the new project and runs the seven
+   validation levels.
+7. **Download.** On *Validation*, click **Download transformed project**. The reports are downloadable
+   from the same page.
+8. **Finish by hand.** Open the project in your IDE, run your tests, move the files listed under *manual
+   review*, and work through the module cycles using the suggestions in `MODULES.md`.
+
+Your original upload is never modified.
+
+## What you get
+
+```
+your-project-transformed.zip
+├── pom.xml / build.gradle            unchanged (or with Spring Modulith added, if you asked for it)
+├── MODULES.md                        what each module contains, its public API, its dependencies,
+│                                     what was kept in place and why, how to break module cycles,
+│                                     and the Spring Modulith test that keeps the boundaries verified
+└── src/main/java/com/shop/
+    ├── ShopApplication.java          application class and wiring stay at the root
+    ├── order/                        module root = public API (types other modules use)
+    │   ├── OrderService.java
+    │   ├── controller/               internal
+    │   └── repository/               internal
+    ├── customer/
+    └── shared/                       code used by several modules
+```
+
+Tests move next to the classes they test. Reports (also available on their own):
+
+| Report | Content |
 |---|---|
-| `/` | Landing page |
-| `/projects/new` | Upload with client-side checks and progress |
-| `/projects/:id` | Overview: metrics, indicators, job progress, cycles, violations, downloads |
-| `/projects/:id/architecture` | Current layers and packages vs. proposed modular layout |
-| `/projects/:id/dependencies` | Interactive graph with type / cross-module / cycle / violation filters |
-| `/projects/:id/modules` | Module review and editor (drag and drop or keyboard "Move to"; rename, merge, split, shared, exclude, lock, public API / internal; undo), module cycles with suggested fixes, export/import of the review |
-| `/projects/:id/plan` | Target layout, Spring Modulith option, layout comparison, transformation table, conflicts, warnings, resource findings, dry run, transform |
-| `/projects/:id/diff` | Side-by-side diff per file |
-| `/projects/:id/validation` | Seven validation levels, build output, downloads |
+| `analysis.json` / `analysis.md` | classes, classification, dependencies, cycles, layer violations |
+| `modules.json` | modules, class assignments with reasons, module cycles and suggestions |
+| `transformation-plan.json` / `transformation-summary.md` | every file: old and new location, actions, safety level, reasons |
+| `validation.json` / `validation-report.md` | the seven levels with every issue and its probable cause |
+
+## How it works
+
+```
+ZIP upload ─▶ safe extraction ─▶ detect Maven/Gradle structure ─▶ parse Java (syntax trees)
+           ─▶ classify classes ─▶ dependency graph ─▶ architecture analysis (layers, cycles)
+           ─▶ module discovery ─▶ optimisation ─▶ cycle-breaking suggestions
+           ─▶ transformation plan ─▶ (your review) ─▶ syntax-aware rewrite ─▶ 7-level validation
+           ─▶ reports + ZIP download
+```
+
+- **Classification** combines evidence: Spring stereotype annotations, framework base classes, structure
+  (e.g. request-mapping methods), names and packages. Agreement raises confidence, conflicts lower it.
+- **Dependencies** are resolved through imports, the same package and wildcard imports, and the JavaParser
+  symbol solver, so a dependency is attached to the right class even when names repeat.
+- **Module discovery** scores how strongly classes belong together (dependencies, naming, package,
+  entities, endpoints, type usage; the weights are configurable), then cleans up: tiny fragments are merged,
+  technology words (`Jdbc`, `Jpa`, `GraphQL`…) are never treated as domains, base classes shared by several
+  modules go to `shared`, and an adapter (for example `MyBatisCommentRepository implements CommentRepository`)
+  joins the module of the interface it implements.
+- **Planning** gives every file an action and a safety level (`SAFE`, `SAFE_WITH_WARNING`,
+  `MANUAL_REVIEW`, `UNSUPPORTED`). Collisions, package-private access across new package boundaries, and
+  classes named in resource files demote a move to *keep in place*.
+- **Rewriting** uses JavaParser to decide *what* changes and the exact source positions to decide *where*;
+  edits are applied to the original text.
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/TRANSFORMATION_ENGINE.md](docs/TRANSFORMATION_ENGINE.md).
+
+## The seven validation levels
+
+| # | Level | Checks |
+|---|---|---|
+| 1 | Filesystem | every source and resource file is present, no two files collide |
+| 2 | Java parsing | every transformed file still parses |
+| 3 | Package consistency | each package declaration matches its folder |
+| 4 | Import resolution | every project import resolves; nothing still imports an old location |
+| 5 | Dependency graph | every dependency of the original exists in the result |
+| 6 | Architecture rules | no module uses another module's internals; module cycles and shared → module dependencies are reported |
+| 7 | Build | sandboxed `mvn test-compile` (or `gradle testClasses`, opt-in). If it fails, the original is built the same way and errors it already had are marked as not caused by the transformation |
+
+Statuses: **Pass**, **Warn** (works, but look at the warnings), **Fail** (something is broken),
+**Skipped** (for example when the build is disabled).
 
 ## Command line
 
 ```bash
-./mvnw -DskipTests package
+./mvnw -DskipTests package          # build once
+
 bin/archmorph analyze   project.zip [--report-dir DIR]
 bin/archmorph plan      project.zip [--report-dir DIR]
 bin/archmorph transform project.zip --output transformed.zip [--report-dir DIR] [--no-build]
-                        [--strategy modular-monolith|modular-by-domain] [--add-modulith-test]
+                        [--strategy modular-monolith|modular-by-domain]
+                        [--add-modulith-test]
                         [--decisions archmorph-decisions.json]
-bin/archmorph hash-password     # bcrypt hash for archmorph.security.auth.users[n].password-hash
+bin/archmorph hash-password         # bcrypt hash for the optional login
 ```
 
-A review made in the UI can be exported (Modules page → *Export decisions*) and replayed with `--decisions`,
-for example in a CI job that regenerates the transformation from the latest source:
+`--decisions` replays a review exported from the UI (Modules → *Export decisions*), so a CI job can
+regenerate the transformation from the latest source with the same decisions.
+
+Exit codes: `0` success, `1` failure (e.g. the archive was rejected), `2` usage error, `3` transformed but
+validation failed (output and reports are still written).
+
+With Docker (Linux / macOS), run the CLI inside the container on a ZIP in the current folder:
 
 ```bash
-bin/archmorph transform project.zip --output transformed.zip --decisions archmorph-decisions.json
+docker compose run --rm --user "$(id -u):$(id -g)" -e ARCHMORPH_WORKSPACE_ROOT=/tmp/cli \
+    -v "$PWD:/work" archmorph transform /work/project.zip --output /work/out.zip --no-build
 ```
 
-Exit codes: `0` success, `1` failure (e.g. the archive was rejected), `2` usage error,
-`3` the project was transformed but validation failed (the output and reports are still written). The CLI uses a temporary workspace that is deleted on exit.
+`--user` lets the container write `out.zip` into your folder; `ARCHMORPH_WORKSPACE_ROOT` gives the CLI its own
+temporary workspace. On Windows, the web UI is the simplest way to convert a project.
 
 ## REST API
 
-Versioned under `/api/v1`, JSON envelope
-`{success, message, data, errorCode, hint, timestamp, requestId}`. Long work runs as jobs (`202 Accepted`
-+ `jobId`). Full reference: [docs/API.md](docs/API.md).
+Versioned under `/api/v1`. Every response uses the envelope
+`{success, message, data, errorCode, hint, timestamp, requestId}`. Long operations run as jobs (`202 Accepted`
+with a `jobId` to poll). Full reference: [docs/API.md](docs/API.md).
 
 ```bash
 H=http://localhost:8080/api/v1
-curl -s -F file=@/tmp/spring-layered.zip $H/projects            # → {projectId, jobId}
-curl -s $H/jobs/$JOB                                             # poll until COMPLETED
-curl -s $H/projects/$P/modules
+curl -s -F file=@project.zip $H/projects                       # → {projectId, jobId}
+curl -s $H/jobs/$JOB                                            # poll until COMPLETED
+curl -s $H/projects/$P/modules                                  # proposed modules, cycles, suggestions
 curl -s -X PUT -H 'Content-Type: application/json' \
      -d '{"edits":[{"type":"RENAME_MODULE","module":"payment","newName":"billing"}]}' $H/projects/$P/modules
-curl -s -X PUT -H 'Content-Type: application/json' \
-     -d '{"strategy":"MODULAR_MONOLITH"}' $H/projects/$P/strategy  # the default; or MODULAR_BY_DOMAIN
-curl -s -X POST "$H/projects/$P/transform?dryRun=true"           # in memory, nothing written
-curl -s -X POST $H/projects/$P/transform                         # job: transform + validate
+curl -s -X POST "$H/projects/$P/transform?dryRun=true"          # preview, nothing written
+curl -s -X POST $H/projects/$P/transform                        # job: transform + validate
 curl -s $H/projects/$P/validation
 curl -s -o transformed.zip $H/projects/$P/download
-curl -s $H/projects/$P/reports/transformation-summary.md
 ```
+
+With login enabled, add `-u user:password`, and add `-H 'X-Requested-With: XMLHttpRequest'` to every
+`POST`, `PUT` and `DELETE`.
+
+## Login (optional)
+
+By default there is no login: anyone who can reach the server can use it, which is fine on your own machine
+(Docker publishes the port on `127.0.0.1` only). For a team, turn on HTTP Basic login:
+
+1. Create a password hash (the password is read without being shown and is never printed):
+
+   ```bash
+   docker compose run --rm archmorph hash-password      # or: bin/archmorph hash-password
+   ```
+
+2. Create `archmorph.env` next to `docker-compose.yml` (it is in `.gitignore`; never commit it). Keep the
+   single quotes, because bcrypt hashes contain `$`:
+
+   ```
+   ARCHMORPH_SECURITY_AUTH_MODE=BASIC
+   ARCHMORPH_SECURITY_AUTH_USERS_0_USERNAME=admin
+   ARCHMORPH_SECURITY_AUTH_USERS_0_PASSWORDHASH='{bcrypt}$2a$12$...'
+   ```
+
+   More users: `ARCHMORPH_SECURITY_AUTH_USERS_1_USERNAME`, `..._1_PASSWORDHASH`, and so on.
+
+3. Uncomment the `env_file` lines in `docker-compose.yml` and restart with `docker compose up --build`.
+
+With login on, every user sees only their own projects, failed logins are throttled, and the server refuses
+to start if a password is not a bcrypt hash. Put HTTPS in front of it if others can reach it. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Configuration
 
-All settings are typed (`ArchMorphProperties`) and live under `archmorph.*` in
-`src/main/resources/application.properties`; override them with `--archmorph.x=y` or environment
-variables (`ARCHMORPH_UPLOAD_MAXARCHIVESIZE=50MB` — Spring relaxed binding drops the dashes).
+Settings live under `archmorph.*` in `src/main/resources/application.properties`. Override them with
+`--archmorph.x=y` on the command line or with environment variables: upper-case, dots become `_`, dashes
+are removed (`archmorph.upload.max-archive-size` → `ARCHMORPH_UPLOAD_MAXARCHIVESIZE`). With Docker, put
+them in `archmorph.env`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `archmorph.upload.max-archive-size` | `100MB` | upload limit (also the multipart limit) |
-| `archmorph.upload.max-uncompressed-size` / `max-entry-count` / `max-single-entry-size` | `500MB` / `20000` / `50MB` | extraction limits, enforced on bytes written |
+| `archmorph.upload.max-archive-size` | `100MB` | upload limit |
+| `archmorph.upload.max-uncompressed-size` / `max-entry-count` / `max-single-entry-size` | `500MB` / `20000` / `50MB` | extraction limits |
 | `archmorph.upload.max-compression-ratio` | `200` | zip-bomb guard |
-| `archmorph.workspace.root` / `retention` | `./workspace` / `PT24H` | where projects live and how long |
+| `archmorph.workspace.root` / `retention` | `./workspace` / `PT24H` | where projects are stored and for how long |
 | `archmorph.analysis.max-java-files` / `timeout` | `10000` / `PT5M` | analysis limits |
-| `archmorph.module-discovery.*-weight` | see file | affinity weights (normalised) |
+| `archmorph.module-discovery.*-weight` | see file | weights of the module-discovery signals |
 | `archmorph.transformation.strategy` | `MODULAR_MONOLITH` | default target layout (`MODULAR_BY_DOMAIN` for package-by-module) |
-| `archmorph.transformation.add-modulith-verification` / `modulith-version` | `false` / derived | add Spring Modulith's test dependency and `ModularityTests` to the output; the version is derived from Spring Boot (4.1 → 2.1.1, 4.0 → 2.0.8, 3.5 → 1.4.13, …) unless set |
-| `archmorph.transformation.modules-package` / `shared-package` | `modules` / `shared` | package names (`modules` is used by `MODULAR_BY_DOMAIN` only) |
-| `archmorph.validation.build.enabled` | `true` | run the sandboxed build level |
-| `archmorph.validation.build.gradle-enabled` / `gradle-executable` / `gradle-user-home` / `gradle-opts` | `false` / `gradle` / next to the Maven repository / `-Xmx1g` | run Gradle builds (off by default: build scripts are code); the server's own Gradle, never the uploaded `gradlew` |
-| `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`, tests skipped) or `TEST` |
-| `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and isolated repository |
-| `archmorph.validation.build.timeout` | `PT4M` | hard wall-clock limit, process tree killed |
-| `archmorph.validation.build.compare-with-original` | `true` | when the transformed project fails to build, build the original too and mark errors it already had (not blamed on the transformation) |
-| `archmorph.security.allowed-origins` | `http://localhost:5173` | CORS allowlist (never `*`) |
-| `archmorph.security.auth.mode` / `auth.users[n].username` / `auth.users[n].password-hash` | `NONE` / – / – | `BASIC` enables login; hashes from `archmorph hash-password` (bcrypt only) |
-| `archmorph.security.rate-limit.*` | enabled | per-client budgets for upload / expensive / download / general |
+| `archmorph.transformation.add-modulith-verification` / `modulith-version` | `false` / derived | add Spring Modulith's test dependency and `ModularityTests`; the version follows Spring Boot unless set |
+| `archmorph.validation.build.enabled` | `true` | run the build level |
+| `archmorph.validation.build.mode` | `COMPILE` | `COMPILE` (`test-compile`) or `TEST` (also runs the tests) |
+| `archmorph.validation.build.offline` / `local-repository` | `false` / workspace | Maven offline mode and repository location |
+| `archmorph.validation.build.timeout` | `PT4M` | hard time limit; the process tree is killed |
+| `archmorph.validation.build.compare-with-original` | `true` | on a failed build, build the original too and mark errors it already had |
+| `archmorph.validation.build.gradle-enabled` | `false` | allow Gradle builds (build scripts are code; read the threat model first) |
+| `archmorph.security.auth.mode` | `NONE` | `BASIC` turns on login (see above) |
+| `archmorph.security.allowed-origins` | `http://localhost:5173` | CORS allowlist, only needed when the UI is served from elsewhere |
+| `archmorph.security.trust-forwarded-headers` | `false` | trust `X-Forwarded-For` (only behind your own reverse proxy) |
+| `archmorph.security.rate-limit.*` | enabled | per-client request budgets |
 | `archmorph.jobs.worker-threads` / `max-queued-jobs` / `max-active-jobs-per-client` | `2` / `20` / `3` | job capacity |
 
-**Build validation runs the project's Maven build**, which executes the plugins and annotation processors the
-uploaded `pom.xml` declares (Gradle, when enabled, evaluates the uploaded build scripts). ArchMorph never runs `mvnw` or scripts from the upload, blocks command-runner
-plugins, clears the environment and enforces a timeout — but this is not a security boundary. For untrusted
-projects run ArchMorph in a disposable container or set `archmorph.validation.build.enabled=false`.
-See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+## Security
 
-## Security model
+ArchMorph accepts source code from users, so uploads are treated as untrusted:
 
-Local, single-user mode by default (no login). For a team, enable HTTP Basic login
-(`archmorph.security.auth.mode=BASIC`, bcrypt-hashed users, projects visible only to their owner, CSRF header
-check, login throttling) and run the hardened container; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Highlights:
+- **Safe extraction:** protection against path traversal (Zip Slip), absolute paths, symlinks, zip bombs,
+  and entry-count and size limits.
+- **Isolation:** server-generated IDs; every path is checked to stay inside its own workspace; workspaces
+  expire.
+- **No code execution during analysis:** analysis only parses code. Uploaded `mvnw`, `gradlew` and scripts are
+  never run.
+- **Sandboxed build:** the optional build level runs the server's own Maven on a copy, with a cleared
+  environment, a time limit, and command-running plugins refused.
+- **Safe responses:** no file paths, stack traces or internal class names in API responses; strict security
+  headers and content security policy.
+- **Abuse limits:** rate limits and job quotas per client.
+- **Logging:** uploaded code and secrets are never logged.
+- **Hardened container:** `docker-compose.yml` runs as a non-root user with a read-only filesystem, no Linux
+  capabilities, and memory, process and CPU limits.
 
-* hardened extraction: Zip Slip, absolute paths, symlinks, NUL bytes, bombs, entry and size limits, `CREATE_NEW`
-* server-generated UUIDs; every path resolved and verified inside its own workspace; workspaces expire
-* uploaded code is never executed except through the allowlisted, sandboxed Maven build (or the opt-in Gradle build)
-* no file-system paths, stack traces or internal class names in responses; generic 500s with a request ID
-* strict CSP, `X-Frame-Options: DENY`, `nosniff`, no-referrer, permissions policy; configured CORS allowlist
-* per-client rate limits and job quotas; uploaded source and secrets are never logged
+**Important:** compiling a project runs its build plugins and annotation processors. That is process-level
+isolation, not a security boundary. For untrusted projects, run ArchMorph in a disposable container, or set
+`archmorph.validation.build.enabled=false` (levels 1–6 never execute uploaded code). Details:
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## Testing
+## Results on real projects
+
+| Project | Size | Modules found | Result |
+|---|---|---|---|
+| [spring-petclinic-rest](https://github.com/spring-petclinic/spring-petclinic-rest) | 109 Java files | owner, pet, vet, visit, specialty, user (+ `ClinicService` flagged as a facade) | The transformed project compiles and passes all **237** of its own tests |
+| [spring-boot-realworld-example-app](https://github.com/gothinkster/spring-boot-realworld-example-app) (Gradle, MyBatis, GraphQL, Lombok) | 116 files | article, comment, profile, tag, user (+ a one-class `relation` module flagged to merge into user) | Levels 1–6 pass; classes named in MyBatis XML kept in place. Build not run (needs Gradle 7.4) |
+| [jhipster-sample-app](https://github.com/jhipster/jhipster-sample-app) | 136 files | account, authority, bankaccount, label, operation, user | Levels 1–6 pass; two same-named exception classes kept in place instead of overwriting each other. Build not run (npm build plugins are refused) |
+| A Spring Boot JWT template (user upload) | 28 files | user, auth | 26 of 28 files moved, all 66 dependencies preserved. The upload itself did not compile; ArchMorph reported its errors as pre-existing. With those 3 errors fixed, the transformed project gives the same test results as the original (18 pass; the same 7 fail for the original's own reasons) |
+
+## How it compares to other tools
+
+| Tool | What it does | Difference |
+|---|---|---|
+| [Spring Modulith](https://spring.io/projects/spring-modulith) | Verifies and documents modules in a modular monolith | Only checks; you restructure the code yourself. ArchMorph does the restructuring and can add Spring Modulith to the result. |
+| IntelliJ IDEA | Refactoring and Spring Modulith support | Classes are moved by hand. |
+| ArchUnit, OpenRewrite | Architecture rule tests; automated refactoring recipes | Neither finds the modules; you decide what goes where. |
+| [IBM Mono2Micro](https://www.ibm.com/docs/SS7H9Y/doc/m2m_1_overview.html), [vFunction](https://vfunction.com/product) | AI-assisted analysis (static and runtime) of Java monoliths | Commercial and aimed mainly at microservices. They also analyse the running application, which ArchMorph does not. |
+
+ArchMorph covers the whole path from a *layered* Spring application to a *modular monolith* in one
+tool: find the modules, move the code safely, prove it still builds, download it.
+
+## Limitations
+
+- **Module discovery is heuristic.** Projects with clear domain names (`OrderService`, `Customer`…) get good
+  suggestions; generic names (`Util`, `Manager`) and unusual layouts get low-confidence ones that need
+  review.
+- **Design problems are reported, not fixed.** Cycles between modules (e.g. `Owner` ↔ `Pet` entities, a
+  service used by every module) remain until you change the code; `MODULES.md` explains how.
+- **Only Java is rewritten.** Kotlin, Groovy and Scala files are kept but not changed.
+- **Strings are not rewritten.** Class names in reflection, SpEL, XML, MyBatis mappers or properties files
+  are reported; such classes stay in place.
+- **Build structure is not changed.** Classes move within their Maven module or Gradle subproject; no new
+  Maven modules are created.
+- **Gradle builds use the server's Gradle**, which may differ from the version the project's wrapper pins
+  (ArchMorph warns when it does).
+- **Behaviour is not proven.** Validation proves consistency and compilation; run your own tests.
+- **Single instance, in memory.** Projects and jobs are forgotten on restart (files are cleaned up by
+  retention).
+
+## Development
 
 ```bash
-./mvnw test                         # backend: unit, golden, invariant, integration, API, CLI, E2E
-cd frontend && npm test             # frontend: vitest + Testing Library
+./mvnw test                                    # backend: 190+ tests (unit, golden, invariant, integration, API, CLI)
+cd frontend && npm test                        # frontend tests (Vitest + Testing Library)
 cd frontend && npm run typecheck && npm run build
-./mvnw test -Dtest=SourceRewriterGoldenTest -Dgolden.update=true   # regenerate golden files (review the diff!)
+./mvnw test -Dtest=SourceRewriterGoldenTest -Dgolden.update=true   # regenerate golden files, then review the diff
 ```
 
-* **19 fixture projects** (`src/test/resources/fixtures`) with `expected.json` expectations: layered,
-  shared components, cycles, ambiguous modules, duplicate class names, nested classes, generics,
-  multi-package, default package, malformed Java, security configuration, reflection, Lombok/MapStruct,
-  a real-world style project, ports and adapters, multi-module Maven (nested aggregator), Gradle single and
-  multi-project builds.
-* **Golden rewriter tests** (`src/test/resources/golden/rewriter`): wildcard and static imports, qualified
-  references, nested classes, import ordering, CRLF, comments inside the import block, untouched files.
-* **Invariant tests** on every fixture: no lost files, unique destinations, package = directory, no stale
-  imports, originals untouched, deterministic output, transformed sources compile in-JVM.
-* **End-to-end Maven test** (`EndToEndMavenTest`) runs the real sandboxed `mvn test-compile` on the
-  transformed project; it runs offline against `~/.m2`, so the Spring Boot dependencies must already be in
-  the local repository, and it is skipped when `mvn` is not on the `PATH`.
+- **19 sample projects** in `src/test/resources/fixtures`, each with an `expected.json`: layered, shared
+  components, cycles, ambiguous modules, duplicate class names, nested classes, generics, default package,
+  malformed Java, reflection, Lombok/MapStruct, ports and adapters, multi-module Maven, Gradle single and
+  multi-project, and more.
+- **Invariant tests** run on every sample in both layouts: no lost files, unique destinations, package
+  matches folder, no stale imports, original untouched, deterministic output, result compiles.
+- **CI** (`.github/workflows/ci.yml`) runs the backend tests, the frontend checks, and builds and smoke-tests
+  the Docker image on every push and pull request.
 
-## Known limitations
-
-* Classes move only within their own Maven module or Gradle subproject; the build structure itself is not
-  restructured (no new Maven modules). Gradle subprojects come from `include(...)` string literals in the
-  settings file; relocated `projectDir`s and composite builds (`includeBuild`) are not analysed.
-* Kotlin, Groovy and Scala sources are preserved but not rewritten; references from them to moved Java classes
-  need manual review.
-* Module discovery is heuristic. Naming conventions matter; projects without domain-named classes produce
-  low-confidence suggestions that need editing.
-* Strings are not code: reflection (`Class.forName("…")`), SpEL, `@ComponentScan` string packages,
-  `application.properties`, XML and MyBatis mappers that mention moved names are **reported** (resource
-  findings, risk flags) but not rewritten. A class named in a resource file (e.g. an OpenAPI spec) stays in place.
-* Moving a class never fixes design problems: module cycles (bidirectional JPA relations, facades over
-  several modules) and shared → module dependencies are reported, not refactored. A module's public API is
-  the set of types other modules use *today*; ArchMorph never changes visibility, introduces interfaces or
-  events, or splits classes.
-* Spring Modulith is only added to your build when you ask for it (Plan page checkbox,
-  `addModulithVerification`, `--add-modulith-test`); fetching it needs network access or a local Maven mirror.
-* Validation proves structural consistency and (optionally) compilation, not behavioural equivalence.
-* State is in memory: restarting the server forgets projects (files are cleaned up by retention).
-  One instance only; rate limits are per instance.
-* Build validation is process-level isolation, not a sandbox boundary (see threat model).
+Tech stack: Java 21, Spring Boot 4, JavaParser, Maven; React 19, TypeScript, Vite, Tailwind CSS, React Flow.
 
 ## Project layout
 
 ```
 src/main/java/com/anvith/archmorph
-├── upload, workspace          secure upload, extraction, isolated workspaces
-├── parser                     JavaParser, ClassMetadata, ComponentClassifier, structure detection
+├── upload, workspace        secure upload, extraction, isolated workspaces
+├── parser                   JavaParser integration, class metadata, classification, Maven/Gradle detection
 ├── analysis
-│   ├── scanner, model, registry
-│   ├── dependency             TypeResolver, extractors, DependencyGraph(+Builder)
-│   ├── architecture, cycle    layer rules, metrics, Tarjan cycles
-│   ├── module                 affinity model, extractor, optimizer, editing, naming
-│   ├── transformation         target architecture, mapping, planner, rewriter, engine, diffs
-│   └── validation             7 levels, BuildPluginGuard, SandboxedMavenRunner
-├── pipeline, project, job     ProjectAnalyzer, ProjectWorkflow, JobManager
-├── report                     JSON + Markdown reports
-├── api, security, cli         REST API + DTOs, headers/CORS/rate limiting, command line
-frontend/                      React 19 + TypeScript + Vite + Tailwind review UI
-docs/                          architecture, audit, threat model, transformation engine, API
+│   ├── dependency           type resolution, dependency extractors, dependency graph
+│   ├── architecture, cycle  layer rules, metrics, cycle detection
+│   ├── module               module discovery, optimiser, editing, naming, cycle-breaking advice
+│   ├── transformation       target layouts, planner, rewriter, engine, Spring Modulith setup, diffs
+│   └── validation           the seven levels, sandboxed Maven/Gradle runners
+├── pipeline, project, job   orchestration, project sessions, background jobs
+├── report                   JSON and Markdown reports, MODULES.md
+├── api, security, cli       REST API, security (headers, login, rate limits), command line
+frontend/                    React review UI
+docs/                        architecture, transformation engine, API, threat model, deployment
+Dockerfile, docker-compose.yml, archmorph.env.example
 ```
 
-## Documentation
+## Troubleshooting
 
-* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, data flow, algorithms
-* [docs/TRANSFORMATION_ENGINE.md](docs/TRANSFORMATION_ENGINE.md) — planner, rewriter, guarantees and examples
-* [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) — threats, mitigations, residual risk
-* [docs/API.md](docs/API.md) — REST reference
-* [docs/ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md) — audit of the codebase before this rework
+| Problem | Fix |
+|---|---|
+| `Bind for 0.0.0.0:8080 failed: port is already allocated` | Another program uses port 8080. Change the port line in `docker-compose.yml` to `"127.0.0.1:8081:8080"` and open http://localhost:8081, or stop the other program (`docker ps` / `netstat -ano \| findstr :8080` on Windows). |
+| Build level says *Skipped: could not resolve dependencies* | The sandboxed build had no network access to your Maven repository; allow access or pre-fill `local-repository` and use `offline=true`. |
+| Build level fails with errors | Read *probable cause* on each issue. Errors marked "already fails the same way in the original project" are not caused by the transformation. |
+| Login prompt keeps coming back | The username or password is wrong, or 10 failed attempts triggered a 5-minute lock-out. |
+| Server refuses to start: *password-hash must be a bcrypt hash* | Create the hash with `hash-password` and keep the single quotes in `archmorph.env`. |
+| A module looks wrong | Fix it on the *Modules* page (move, merge, rename), then transform again. |
 
-The development history of the earlier sprint-based prototype is available in the git history.
+## Further documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, data flow, algorithms
+- [docs/TRANSFORMATION_ENGINE.md](docs/TRANSFORMATION_ENGINE.md): planner, rewriter, guarantees, examples
+- [docs/API.md](docs/API.md): REST API reference
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): Docker, login, TLS, egress control
+- [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md): threats, mitigations, residual risk
+- [docs/ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md): audit of the original prototype
